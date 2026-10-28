@@ -160,6 +160,10 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
         )
     rng = random.Random(args.seed)
     store = FindingStore(args.state or config.state)
+    # Fingerprinting a checker can mean hashing a large native executable.  A hunt
+    # records the same checker snapshot for every candidate, so compute it once
+    # instead of re-reading every executable on every mutation.
+    kernel_metadata = [kernel.public() for kernel in kernels]
     frontier: list[
         tuple[
             Path,
@@ -311,7 +315,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                     "new_features_truncated": len(added) > 256,
                     "total_seen": len(seen_feedback),
                 },
-                "kernels": [kernel.public() for kernel in kernels],
+                "kernels": kernel_metadata,
                 "results": matrix_json(results),
             }
             if interesting:

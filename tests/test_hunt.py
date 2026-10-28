@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pestycyd.cli import (
     feedback_features,
@@ -21,6 +22,47 @@ from pestycyd.outcomes import Outcome
 
 
 class HuntTests(unittest.TestCase):
+    def test_hunt_fingerprints_each_kernel_once(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            seed = root / "seed.ndjson"
+            seed.write_text('{"idx":2}\n')
+            kernel = KernelSpec(
+                name="target",
+                command=(sys.executable, "-c", "print('accepted')", "{file}"),
+                cwd=root,
+                timeout=5.0,
+                verdict="required",
+            )
+            state = root / "state"
+            config = Config(path=root / "pestycyd.toml", state=state, kernels=(kernel,))
+            args = argparse.Namespace(
+                paths=[str(seed)],
+                campaign=["metadata-boundaries"],
+                seed=7,
+                state=None,
+                workers=None,
+                iterations=2,
+                max_depth=1,
+                max_children=32,
+                seed_policy="accepted",
+                semantic_only=False,
+                behavior_feedback=False,
+                feedback_depth_first=False,
+                protect_final_goal=False,
+                finding_expect=[],
+                verbose=False,
+            )
+
+            with mock.patch(
+                "pestycyd.config.executable_fingerprint",
+                return_value={"path": "checker", "sha256": "abc", "bytes": 1},
+            ) as fingerprint, contextlib.redirect_stdout(io.StringIO()):
+                result = hunt(config, (kernel,), args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(fingerprint.call_count, 1)
+
     def test_novel_feedback_grows_persistent_corpus(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
