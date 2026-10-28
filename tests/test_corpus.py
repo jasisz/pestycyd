@@ -14,6 +14,7 @@ class CorpusTests(unittest.TestCase):
         self.assertGreaterEqual(len(cases), 10)
         for case in cases:
             with self.subTest(case=case.name):
+                self.assertNotIn("", case.read_text().splitlines())
                 self.assertTrue(Document.load(case).lines)
                 self.assertTrue(well_formed_export(case.read_text().splitlines()))
 

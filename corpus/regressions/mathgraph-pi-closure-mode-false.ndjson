@@ -1,0 +1,9 @@
+{"meta":{"exporter":{"name":"pestycyd","version":"0.1.0"},"format":{"version":"3.1.0"},"lean":{"githash":"f72c35b3f637c8c6571d353742168ab66cc22c00","version":"4.29.1"}}}
+{"in":1,"str":{"pre":0,"str":"Pestycyd"}}
+{"in":2,"str":{"pre":1,"str":"boom"}}
+{"in":3,"str":{"pre":0,"str":"P"}}
+{"ie":0,"sort":0}
+{"bvar":0,"ie":1}
+{"forallE":{"binderInfo":"default","body":1,"name":3,"type":0},"ie":2}
+{"ie":3,"lam":{"binderInfo":"default","body":1,"name":3,"type":0}}
+{"thm":{"all":[2],"levelParams":[],"name":2,"type":2,"value":3}}

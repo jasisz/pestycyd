@@ -192,6 +192,7 @@ behavior feedback still grow the search through other outcomes.
 
 ## Built-in corpus and generators
 
+`corpus/good/` contains small official-kernel-accepted mutation seeds.
 `corpus/regressions/` contains confirmed historical bugs and negative
 escalation attempts. `corpus/leads/` contains composition material that is not
 itself a soundness claim. Their READMEs link every filed upstream issue and
