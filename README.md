@@ -193,6 +193,9 @@ When evolving known mismatches or near-misses, add
 `--finding-require-seed-change` to suppress candidates whose original seed
 already had the requested outcome vector. The seed result remains recorded in
 the sidecar as `seed_matched_finding_expectations`.
+`--feedback-depth-first` runs children of a coverage- or behavior-expanding
+input immediately, which is useful for multi-step escalation from a near-miss;
+the default breadth-first schedule remains better for broad corpus discovery.
 
 ## Built-in corpus and generators
 

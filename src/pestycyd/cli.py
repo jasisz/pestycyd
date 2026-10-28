@@ -338,7 +338,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                     ]
                     rng.shuffle(descendants)
                     descendants = descendants[: args.max_children]
-                    queue.extend(
+                    entries = [
                         (
                             seed,
                             child,
@@ -349,7 +349,11 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                             seed_matches_finding,
                         )
                         for next_mutation in descendants
-                    )
+                    ]
+                    if getattr(args, "feedback_depth_first", False):
+                        queue.extendleft(reversed(entries))
+                    else:
+                        queue.extend(entries)
             elif args.verbose:
                 print(f"ok {attempts} {mutation.label}: {statuses(results)}")
     print(
@@ -463,6 +467,11 @@ def parser() -> argparse.ArgumentParser:
             "grow the queue from new normalized outcome fingerprints as well as explicit "
             "instrumentation; useful for fast release-only screening"
         ),
+    )
+    command.add_argument(
+        "--feedback-depth-first",
+        action="store_true",
+        help="run children of feedback-expanding inputs before the remaining frontier",
     )
     command.add_argument(
         "--protect-final-goal",

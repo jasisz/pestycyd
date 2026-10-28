@@ -105,6 +105,54 @@ class HuntTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertIn("hunt: 1 mutations", stdout.getvalue())
 
+    def test_feedback_depth_first_runs_descendant_immediately(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            seed = root / "seed.ndjson"
+            seed.write_text('{"idx":2}\n')
+            script = (
+                "from pathlib import Path; import hashlib, sys; "
+                "data=Path(sys.argv[1]).read_bytes(); "
+                "Path(sys.argv[2]).write_text(hashlib.sha256(data).hexdigest()); "
+                "print('accepted')"
+            )
+            kernel = KernelSpec(
+                name="instrumented",
+                command=(sys.executable, "-c", script, "{file}", "{run_dir}/trace"),
+                cwd=root,
+                timeout=5.0,
+                verdict="required",
+                feedback=FeedbackSpec(format="lines", path="{run_dir}/trace", required=True),
+            )
+            state = root / "state"
+            config = Config(path=root / "pestycyd.toml", state=state, kernels=(kernel,))
+            args = argparse.Namespace(
+                paths=[str(seed)],
+                campaign=["metadata-boundaries"],
+                seed=7,
+                state=None,
+                workers=None,
+                iterations=2,
+                max_depth=2,
+                max_children=32,
+                seed_policy="accepted",
+                semantic_only=False,
+                behavior_feedback=False,
+                feedback_depth_first=True,
+                protect_final_goal=False,
+                finding_expect=[],
+                verbose=False,
+            )
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                hunt(config, (kernel,), args)
+            runs = [
+                __import__("json").loads(line)
+                for line in (state / "runs.jsonl").read_text().splitlines()
+            ]
+
+        self.assertEqual([run["depth"] for run in runs], [1, 2])
+
     def test_semantic_only_ignores_reject_versus_internal_error(self) -> None:
         mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")
         results = {
