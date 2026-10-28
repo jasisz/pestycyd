@@ -225,9 +225,10 @@ The stateful campaigns attack relationships that single-field fuzzers miss:
 entries, `inductive-block-crosswire` transplants scope-compatible recursor
 semantics, and `intern-table-shadowing` inserts a second expression under an
 already-used intern ID immediately before a declaration consumes it.
-`recursor-rule-permutations` found the checked-in
-`prop-recursor-rule-swap.ndjson` validation mismatch from a valid seed without
-reading the affected kernels' source.
+`recursor-rule-permutations` also exercises serialized recursor fields. The
+checked-in `prop-recursor-derived-field-swap.ndjson` is a negative control, not
+a soundness finding: those fields are derived from the inductive declaration,
+so a checker may safely derive and ignore them.
 
 ## Findings
 
