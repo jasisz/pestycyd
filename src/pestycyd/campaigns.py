@@ -1358,6 +1358,17 @@ def inductive_structure(document: Document) -> Iterable[Mutation]:
             for index, item in enumerate(items):
                 if not isinstance(item, dict):
                     continue
+                yield Mutation(
+                    "inductive-structure",
+                    f"{group}-{index}-omit",
+                    "differential",
+                    line_no,
+                    ("inductive",),
+                    group,
+                    [*items[:index], *items[index + 1:]],
+                    f"inductive {group} membership completeness",
+                    line_no,
+                )
                 path = ("inductive", group, index)
                 params = item.get("levelParams")
                 if isinstance(params, list) and params:

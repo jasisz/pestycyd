@@ -193,6 +193,27 @@ class CampaignTests(unittest.TestCase):
         self.assertEqual(changed.lines[0]["inductive"]["types"][0]["ctors"], [3, 2])
         self.assertEqual(mutation.target, "constructor membership and ordering")
 
+    def test_inductive_structure_omits_recursor_entry_atomically(self) -> None:
+        document = Document(
+            (
+                {
+                    "inductive": {
+                        "types": [],
+                        "ctors": [],
+                        "recs": [{"name": 1}, {"name": 2}],
+                    }
+                },
+            )
+        )
+        mutation = next(
+            mutation
+            for mutation in CAMPAIGNS["inductive-structure"].generate(document)
+            if mutation.label == "recs-0-omit"
+        )
+        changed = document.mutated(mutation)
+        self.assertEqual(changed.lines[0]["inductive"]["recs"], [{"name": 2}])
+        self.assertEqual(mutation.target, "inductive recs membership completeness")
+
     def test_compound_mutation_applies_all_edits_atomically(self) -> None:
         document = Document(({"left": {"x": 1}, "right": {"x": 2}},))
         mutation = Mutation(
