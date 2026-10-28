@@ -214,6 +214,56 @@ class CampaignTests(unittest.TestCase):
         self.assertEqual(changed.lines[0]["inductive"]["recs"], [{"name": 2}])
         self.assertEqual(mutation.target, "inductive recs membership completeness")
 
+    def test_inductive_structure_swaps_mutual_all_order_atomically(self) -> None:
+        document = Document(
+            (
+                {
+                    "inductive": {
+                        "types": [{"name": 1, "all": [1, 2]}],
+                        "ctors": [],
+                        "recs": [],
+                    }
+                },
+            )
+        )
+        mutation = next(
+            mutation
+            for mutation in CAMPAIGNS["inductive-structure"].generate(document)
+            if mutation.label == "types-0-all-0-1-swap"
+        )
+        changed = document.mutated(mutation)
+        self.assertEqual(changed.lines[0]["inductive"]["types"][0]["all"], [2, 1])
+        self.assertEqual(mutation.target, "mutual inductive membership and ordering")
+
+    def test_inductive_structure_swaps_all_block_members_atomically(self) -> None:
+        document = Document(
+            (
+                {
+                    "inductive": {
+                        "types": [
+                            {"name": 1, "all": [1, 2]},
+                            {"name": 2, "all": [1, 2]},
+                        ],
+                        "ctors": [],
+                        "recs": [
+                            {"name": 3, "all": [1, 2]},
+                            {"name": 4, "all": [1, 2]},
+                        ],
+                    }
+                },
+            )
+        )
+        mutation = next(
+            mutation
+            for mutation in CAMPAIGNS["inductive-structure"].generate(document)
+            if mutation.label == "block-all-0-1-swap"
+        )
+        changed = document.mutated(mutation)
+        block = changed.lines[0]["inductive"]
+        self.assertTrue(all(item["all"] == [2, 1] for item in block["types"]))
+        self.assertTrue(all(item["all"] == [2, 1] for item in block["recs"]))
+        self.assertEqual(mutation.target, "mutual block-wide dependency ordering")
+
     def test_compound_mutation_applies_all_edits_atomically(self) -> None:
         document = Document(({"left": {"x": 1}, "right": {"x": 2}},))
         mutation = Mutation(

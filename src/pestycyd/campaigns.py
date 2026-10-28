@@ -1351,6 +1351,45 @@ def inductive_structure(document: Document) -> Iterable[Mutation]:
         )
         if unsafe:
             continue
+        all_paths: list[tuple[object, ...]] = []
+        common_all: list[object] | None = None
+        for group in ("types", "recs"):
+            items = block.get(group)
+            if not isinstance(items, list):
+                continue
+            for index, item in enumerate(items):
+                if not isinstance(item, dict) or not isinstance(item.get("all"), list):
+                    continue
+                names = item["all"]
+                if common_all is None:
+                    common_all = list(names)
+                elif names != common_all:
+                    common_all = []
+                    break
+                all_paths.append(("inductive", group, index))
+            if common_all == []:
+                break
+        if common_all is not None and len(common_all) > 1 and len(all_paths) > 1:
+            for name_index in range(len(common_all) - 1):
+                swapped = list(common_all)
+                swapped[name_index], swapped[name_index + 1] = (
+                    swapped[name_index + 1], swapped[name_index]
+                )
+                yield Mutation(
+                    "inductive-structure",
+                    f"block-all-{name_index}-{name_index + 1}-swap",
+                    "differential",
+                    line_no,
+                    all_paths[0],
+                    "all",
+                    swapped,
+                    "mutual block-wide dependency ordering",
+                    line_no,
+                    edits=tuple(
+                        Edit(line_no, path, "all", swapped)
+                        for path in all_paths[1:]
+                    ),
+                )
         for group in ("types", "ctors", "recs"):
             items = block.get(group)
             if not isinstance(items, list):
@@ -1393,6 +1432,22 @@ def inductive_structure(document: Document) -> Iterable[Mutation]:
                     yield Mutation("inductive-structure", f"{group}-{index}-all-duplicate",
                                    "differential", line_no, path, "all", [all_names[0], *all_names],
                                    "inductive dependency metadata", line_no)
+                    for name_index in range(len(all_names) - 1):
+                        swapped = list(all_names)
+                        swapped[name_index], swapped[name_index + 1] = (
+                            swapped[name_index + 1], swapped[name_index]
+                        )
+                        yield Mutation(
+                            "inductive-structure",
+                            f"{group}-{index}-all-{name_index}-{name_index + 1}-swap",
+                            "differential",
+                            line_no,
+                            path,
+                            "all",
+                            swapped,
+                            "mutual inductive membership and ordering",
+                            line_no,
+                        )
                 numeric_fields = {
                     "types": ("numParams", "numIndices", "numNested"),
                     "ctors": ("cidx", "numFields", "numParams"),
