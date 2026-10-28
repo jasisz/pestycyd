@@ -152,6 +152,44 @@ class HuntTests(unittest.TestCase):
         self.assertTrue(matches_expectations(expected, reject_accept))
         self.assertFalse(matches_expectations(expected, reject_decline))
 
+    def test_exact_finding_can_require_change_from_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            seed = root / "seed.ndjson"
+            seed.write_text('{"idx":2}\n')
+            kernel = KernelSpec(
+                name="target",
+                command=(sys.executable, "-c", "print('accepted')", "{file}"),
+                cwd=root,
+                timeout=5.0,
+                verdict="required",
+            )
+            state = root / "state"
+            config = Config(path=root / "pestycyd.toml", state=state, kernels=(kernel,))
+            args = argparse.Namespace(
+                paths=[str(seed)],
+                campaign=["metadata-boundaries"],
+                seed=7,
+                state=None,
+                workers=None,
+                iterations=1,
+                max_depth=1,
+                max_children=32,
+                seed_policy="accepted",
+                semantic_only=True,
+                behavior_feedback=False,
+                protect_final_goal=False,
+                finding_expect=[("target", "accept")],
+                finding_require_seed_change=True,
+                verbose=False,
+            )
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = hunt(config, (kernel,), args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(list((state / "findings").glob("*.ndjson")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

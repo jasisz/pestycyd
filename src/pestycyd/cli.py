@@ -168,6 +168,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
             int,
             tuple[dict[str, object], ...],
             frozenset[int],
+            bool,
         ]
     ] = []
     frontier_buckets: list[
@@ -179,6 +180,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                 int,
                 tuple[dict[str, object], ...],
                 frozenset[int],
+                bool,
             ]
         ]
     ] = []
@@ -219,13 +221,19 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
             if getattr(args, "protect_final_goal", False)
             else frozenset()
         )
+        seed_matches_finding = bool(finding_expect) and matches_expectations(
+            finding_expect, baseline
+        )
         mutations = [
             mutation
             for campaign in campaigns
             for mutation in campaign.generate(document)
             if allowed(mutation, protected)
         ]
-        bucket = [(path, document, mutation, 1, (), protected) for mutation in mutations]
+        bucket = [
+            (path, document, mutation, 1, (), protected, seed_matches_finding)
+            for mutation in mutations
+        ]
         rng.shuffle(bucket)
         frontier_buckets.append(bucket)
     while any(frontier_buckets):
@@ -243,7 +251,15 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
     with tempfile.TemporaryDirectory(prefix="pestycyd-hunt-") as directory:
         candidate = Path(directory) / "candidate.ndjson"
         while queue and (args.iterations is None or attempts < args.iterations):
-            seed, document, original, depth, lineage, protected = queue.popleft()
+            (
+                seed,
+                document,
+                original,
+                depth,
+                lineage,
+                protected,
+                seed_matches_finding,
+            ) = queue.popleft()
             mutation = original if depth == 1 else dataclasses.replace(original, oracle="differential")
             child = document.mutated(mutation)
             child_protected = (
@@ -263,12 +279,18 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                 mutation, results, include_robustness=not args.semantic_only
             )
             if finding_expect:
-                interesting = matches_expectations(finding_expect, results)
-                reason = (
-                    "matched requested finding outcomes"
-                    if interesting
-                    else "did not match requested finding outcomes"
+                candidate_matches = matches_expectations(finding_expect, results)
+                inherited = (
+                    getattr(args, "finding_require_seed_change", False)
+                    and seed_matches_finding
                 )
+                interesting = candidate_matches and not inherited
+                if inherited and candidate_matches:
+                    reason = "seed already matched requested finding outcomes"
+                elif candidate_matches:
+                    reason = "matched requested finding outcomes"
+                else:
+                    reason = "did not match requested finding outcomes"
             features = feedback_features(
                 results, include_behavior=getattr(args, "behavior_feedback", False)
             )
@@ -281,6 +303,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                 "lineage": list(history),
                 "depth": depth,
                 "protected_goal_lines": sorted(line + 1 for line in child_protected),
+                "seed_matched_finding_expectations": seed_matches_finding,
                 "reason": reason,
                 "feedback": {
                     "new": len(added),
@@ -316,7 +339,15 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                     rng.shuffle(descendants)
                     descendants = descendants[: args.max_children]
                     queue.extend(
-                        (seed, child, next_mutation, depth + 1, history, child_protected)
+                        (
+                            seed,
+                            child,
+                            next_mutation,
+                            depth + 1,
+                            history,
+                            child_protected,
+                            seed_matches_finding,
+                        )
                         for next_mutation in descendants
                     )
             elif args.verbose:
@@ -450,6 +481,14 @@ def parser() -> argparse.ArgumentParser:
         help=(
             "record findings only when every requested kernel has the exact status; "
             "feedback-guided corpus growth is unchanged"
+        ),
+    )
+    command.add_argument(
+        "--finding-require-seed-change",
+        action="store_true",
+        help=(
+            "with --finding-expect, ignore candidates whose original seed already "
+            "matched the requested outcomes"
         ),
     )
     command.add_argument("--verbose", action="store_true")

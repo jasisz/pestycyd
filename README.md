@@ -189,6 +189,10 @@ uv run pestycyd --config pestycyd.toml hunt corpus/ \
 
 This filter changes only which inputs are recorded as findings. Coverage and
 behavior feedback still grow the search through other outcomes.
+When evolving known mismatches or near-misses, add
+`--finding-require-seed-change` to suppress candidates whose original seed
+already had the requested outcome vector. The seed result remains recorded in
+the sidecar as `seed_matched_finding_expectations`.
 
 ## Built-in corpus and generators
 
