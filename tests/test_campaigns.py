@@ -172,6 +172,27 @@ class CampaignTests(unittest.TestCase):
         self.assertEqual(len(changed.lines), 2)
         self.assertIn("thm", changed.lines[-1])
 
+    def test_inductive_structure_swaps_constructor_order_atomically(self) -> None:
+        document = Document(
+            (
+                {
+                    "inductive": {
+                        "types": [{"name": 1, "ctors": [2, 3]}],
+                        "ctors": [],
+                        "recs": [],
+                    }
+                },
+            )
+        )
+        mutation = next(
+            mutation
+            for mutation in CAMPAIGNS["inductive-structure"].generate(document)
+            if mutation.label == "types-0-ctors-0-1-swap"
+        )
+        changed = document.mutated(mutation)
+        self.assertEqual(changed.lines[0]["inductive"]["types"][0]["ctors"], [3, 2])
+        self.assertEqual(mutation.target, "constructor membership and ordering")
+
     def test_compound_mutation_applies_all_edits_atomically(self) -> None:
         document = Document(({"left": {"x": 1}, "right": {"x": 2}},))
         mutation = Mutation(

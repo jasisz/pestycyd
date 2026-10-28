@@ -1401,6 +1401,22 @@ def inductive_structure(document: Document) -> Iterable[Mutation]:
                         yield Mutation("inductive-structure", f"types-{index}-ctors-duplicate",
                                        "differential", line_no, path, "ctors", [ctors[0], *ctors],
                                        "constructor membership", line_no)
+                        for ctor_index in range(len(ctors) - 1):
+                            swapped = list(ctors)
+                            swapped[ctor_index], swapped[ctor_index + 1] = (
+                                swapped[ctor_index + 1], swapped[ctor_index]
+                            )
+                            yield Mutation(
+                                "inductive-structure",
+                                f"types-{index}-ctors-{ctor_index}-{ctor_index + 1}-swap",
+                                "differential",
+                                line_no,
+                                path,
+                                "ctors",
+                                swapped,
+                                "constructor membership and ordering",
+                                line_no,
+                            )
                     for field in ("isRec", "isReflexive"):
                         value = item.get(field)
                         if isinstance(value, bool):
