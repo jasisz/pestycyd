@@ -5,8 +5,10 @@ from pestycyd.cli import _compose_lineage_oracle
 from pestycyd.minimize import well_formed_export
 from pestycyd.ndjson import Document
 from pestycyd.transforms import (
+    FIELD_FAULTS,
     NONZERO_IMPOSTORS,
     ZERO_DISGUISES,
+    append_field_inductive,
     append_prop_impostor,
     clonable_value,
     swap_independent_declarations,
@@ -99,7 +101,10 @@ class TransformTests(unittest.TestCase):
             )
         )
         mutations = {m.label: m for m in CAMPAIGNS["single-fault"].generate(document)}
-        self.assertEqual(set(mutations), {"let-ill-typed-def", "theorem-of-type", "undeclared-universe"})
+        self.assertEqual(
+            set(mutations),
+            {"let-ill-typed-def", "theorem-of-type", "undeclared-universe", "non-positive", "field-too-large"},
+        )
         self.assertTrue(all(m.oracle == "guaranteed-reject" for m in mutations.values()))
         for mutation in mutations.values():
             self.assert_well_formed(document.mutated(mutation))
@@ -123,6 +128,16 @@ class TransformTests(unittest.TestCase):
         use = expr_table(appended)[bad["value"]]["const"]
         levels = {line["il"]: line for line in appended.lines if "il" in line}
         self.assertIn("param", levels[use["us"][0]])
+
+    def test_field_inductive_serializes_its_own_recursor(self) -> None:
+        for fault in FIELD_FAULTS:
+            changed = append_field_inductive(self.document, fault)
+            self.assert_well_formed(changed)
+            block = changed.lines[-1]["inductive"]
+            (rec,) = block["recs"]
+            (ctor,) = block["ctors"]
+            self.assertEqual(rec["rules"], [{"ctor": ctor["name"], "nfields": 1, "rhs": rec["rules"][0]["rhs"]}])
+            self.assertEqual(block["types"][0]["isRec"], fault == "non-positive")
 
     def test_wrap_eta_builds_expanded_lambda(self) -> None:
         document = Document(

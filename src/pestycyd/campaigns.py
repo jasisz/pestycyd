@@ -1718,6 +1718,13 @@ def single_fault(document: Document) -> Iterable[Mutation]:
                 "theorem type must be a proposition",
                 rewrite=Rewrite("theorem-of-type", line_no),
             )
+    for fault in ("non-positive", "field-too-large"):
+        yield Mutation(
+            "single-fault", fault, "guaranteed-reject",
+            len(lines) - 1, (), "inductive", fault,
+            "inductive constructor fields: positivity and universe bound",
+            rewrite=Rewrite("append-field-inductive", len(lines) - 1, (), (fault,)),
+        )
     yield Mutation(
         "single-fault", "undeclared-universe", "guaranteed-reject",
         len(lines) - 1, (), "levelParams", "u",
@@ -2083,8 +2090,8 @@ CAMPAIGNS: dict[str, Campaign] = {
     ),
     "single-fault": Campaign(
         "single-fault", "guaranteed-reject",
-        "Break exactly one kernel rule (let value, theorem in Prop, bound universes) in a valid document.",
-        ("letTypeMismatch", "thmTypeIsNotProp", "undefined universe parameter"),
+        "Break exactly one kernel rule (let value, theorem in Prop, bound universes, positivity, field universe).",
+        ("letTypeMismatch", "thmTypeIsNotProp", "undefined universe parameter", "positivity", "field universe bound"),
         single_fault,
     ),
     "declaration-reordering": Campaign(

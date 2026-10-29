@@ -824,6 +824,36 @@ def theorem_of_type(document: Document, line_no: int) -> Document:
     return Document(tuple(lines))
 
 
+class _Appender:
+    """Appends records under fresh table identifiers past every existing one."""
+
+    def __init__(self, lines: list[dict[str, object]]) -> None:
+        self.lines = lines
+        self.next = {
+            key: 1 + max([0, *(line[key] for line in lines if isinstance(line.get(key), int))])
+            for key in ("in", "il", "ie")
+        }
+
+    def add(self, key: str, **payload: object) -> int:
+        identifier = self.next[key]
+        self.next[key] += 1
+        self.lines.append({key: identifier, **payload})
+        return identifier
+
+    def name(self, text: str) -> int:
+        return self.add("in", str={"pre": 0, "str": text})
+
+    def pi(self, name: int, domain: int, body: int, implicit: bool = False) -> int:
+        info = "implicit" if implicit else "default"
+        return self.add("ie", forallE={"binderInfo": info, "name": name, "type": domain, "body": body})
+
+    def lam(self, name: int, domain: int, body: int) -> int:
+        return self.add("ie", lam={"binderInfo": "default", "name": name, "type": domain, "body": body})
+
+    def app(self, fn: int, arg: int) -> int:
+        return self.add("ie", app={"fn": fn, "arg": arg})
+
+
 def append_undeclared_universe(document: Document) -> Document:
     """Append ``def k.{v} : Type := Prop`` and ``def bad : Type := k.{u}``.
 
@@ -831,35 +861,72 @@ def append_undeclared_universe(document: Document) -> Document:
     any ``u``: the only fault is that ``bad`` binds no ``u``.
     """
     lines = [copy.deepcopy(line) for line in document.lines]
-    used = {key: max([0, *(line[key] for line in lines if isinstance(line.get(key), int))]) for key in ("in", "il", "ie")}
-    next_in, next_il, next_ie = used["in"] + 1, used["il"] + 1, used["ie"] + 1
-
-    def record(key: str, **payload: object) -> int:
-        nonlocal next_in, next_il, next_ie
-        identifier = {"in": next_in, "il": next_il, "ie": next_ie}[key]
-        lines.append({key: identifier, **payload})
-        if key == "in":
-            next_in += 1
-        elif key == "il":
-            next_il += 1
-        else:
-            next_ie += 1
-        return identifier
-
-    k_name = record("in", str={"pre": 0, "str": "pestycydUniverseFree"})
-    bad_name = record("in", str={"pre": 0, "str": "pestycydUndeclaredUniverse"})
-    v_name = record("in", str={"pre": 0, "str": "v"})
-    u_name = record("in", str={"pre": 0, "str": "u"})
-    one = record("il", succ=0)
-    record("il", param=v_name)  # exporters emit a level for every declared parameter
-    u = record("il", param=u_name)
-    prop = record("ie", sort=0)
-    type_ = record("ie", sort=one)
+    out = _Appender(lines)
+    k_name = out.name("pestycydUniverseFree")
+    bad_name = out.name("pestycydUndeclaredUniverse")
+    v_name, u_name = out.name("v"), out.name("u")
+    one = out.add("il", succ=0)
+    out.add("il", param=v_name)  # exporters emit a level for every declared parameter
+    u = out.add("il", param=u_name)
+    prop, type_ = out.add("ie", sort=0), out.add("ie", sort=one)
     lines.append({"def": {"all": [k_name], "hints": "abbrev", "levelParams": [v_name], "name": k_name,
                           "safety": "safe", "type": type_, "value": prop}})
-    use = record("ie", const={"name": k_name, "us": [u]})
+    use = out.add("ie", const={"name": k_name, "us": [u]})
     lines.append({"def": {"all": [bad_name], "hints": "abbrev", "levelParams": [], "name": bad_name,
                           "safety": "safe", "type": type_, "value": use}})
+    return Document(tuple(lines))
+
+
+# Field types for append_field_inductive: the one rule each breaks.
+FIELD_FAULTS = ("non-positive", "field-too-large", "control")
+
+
+def append_field_inductive(document: Document, fault: str) -> Document:
+    """Append ``inductive I : Type | mk : F → I`` with its exact recursor.
+
+    ``F`` is ``I → Prop`` (a non-positive occurrence), ``Type`` (a field
+    in a universe above the type's), or ``Prop`` for the valid control.
+    ``F`` never ends in ``I``, so the field is non-recursive and the
+    serialized recursor is the one a checker missing the broken rule
+    derives: positivity or the universe bound is the only fault.
+    ``isRec`` follows whether a field mentions ``I``, which is how checkers
+    that validate it (rather than derive it) compute the flag.
+    """
+    if fault not in FIELD_FAULTS:
+        raise ValueError(f"unknown field fault: {fault}")
+    lines = [copy.deepcopy(line) for line in document.lines]
+    out = _Appender(lines)
+    stem = {"non-positive": "Neg", "field-too-large": "Big", "control": "Ok"}[fault]
+    i_name = out.name(f"Pestycyd{stem}")
+    mk_name = out.add("in", str={"pre": i_name, "str": "mk"})
+    rec_name = out.add("in", str={"pre": i_name, "str": "rec"})
+    u_name, motive_name, t_name, a_name = (out.name(text) for text in ("u", "motive", "t", "a"))
+    one = out.add("il", succ=0)
+    u = out.add("il", param=u_name)
+    prop, type_, sort_u = out.add("ie", sort=0), out.add("ie", sort=one), out.add("ie", sort=u)
+    i = out.add("ie", const={"name": i_name, "us": []})
+    mk = out.add("ie", const={"name": mk_name, "us": []})
+    field = {"non-positive": lambda: out.pi(t_name, i, prop), "field-too-large": lambda: type_,
+             "control": lambda: prop}[fault]()
+    b0, b1, b2 = (out.add("ie", bvar=index) for index in range(3))
+    ctor_type = out.pi(a_name, field, i)
+    motive_type = out.pi(t_name, i, sort_u)
+    # Under motive: ∀ (a : F), motive (mk a).
+    minor = out.pi(a_name, field, out.app(b1, out.app(mk, b0)))
+    # ∀ {motive}, ∀ (mk : minor), ∀ (t : I), motive t.
+    rec_type = out.pi(motive_name, motive_type, out.pi(mk_name, minor, out.pi(t_name, i, out.app(b2, b0))), implicit=True)
+    # fun motive mk a => mk a.
+    rhs = out.lam(motive_name, motive_type, out.lam(mk_name, minor, out.lam(a_name, field, out.app(b1, b0))))
+    lines.append({"inductive": {
+        "types": [{"all": [i_name], "ctors": [mk_name], "isRec": fault == "non-positive", "isReflexive": False, "isUnsafe": False,
+                   "levelParams": [], "name": i_name, "numIndices": 0, "numNested": 0, "numParams": 0,
+                   "type": type_}],
+        "ctors": [{"cidx": 0, "induct": i_name, "isUnsafe": False, "levelParams": [], "name": mk_name,
+                   "numFields": 1, "numParams": 0, "type": ctor_type}],
+        "recs": [{"all": [i_name], "isUnsafe": False, "k": False, "levelParams": [u_name], "name": rec_name,
+                  "numIndices": 0, "numMinors": 1, "numMotives": 1, "numParams": 0,
+                  "rules": [{"ctor": mk_name, "nfields": 1, "rhs": rhs}], "type": rec_type}],
+    }})
     return Document(tuple(lines))
 
 
@@ -884,6 +951,8 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return let_ill_typed(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "theorem-of-type":
         return theorem_of_type(Document(tuple(lines)), rewrite.line)
+    if kind == "append-field-inductive":
+        return append_field_inductive(Document(tuple(lines)), str(rewrite.params[0]))
     if kind == "append-undeclared-universe":
         return append_undeclared_universe(Document(tuple(lines)))
     if kind == "append-prop-impostor":
