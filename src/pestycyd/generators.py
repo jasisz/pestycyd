@@ -83,6 +83,67 @@ def deep_binder(depth: int) -> str:
     return "".join(json.dumps(line, separators=(",", ":")) + "\n" for line in lines)
 
 
+def app_spine(depth: int) -> str:
+    """A valid export whose value nests `depth` applications deep.
+
+    ``g : A → A → A`` with ``A = Prop → Prop`` and ``a : A`` build a
+    left-nested spine ``g a (g a (g a … a))`` of the requested depth.
+    Type checking must traverse the whole spine, so this stresses
+    recursion limits in inference and whnf the way ``deep_binder``
+    stresses loose-range tracking.
+    """
+    if depth < 1:
+        raise ValueError("depth must be positive")
+    lines: list[dict[str, object]] = [
+        {
+            "meta": {
+                "exporter": {"name": "lean4export", "version": "3.1.0"},
+                "format": {"version": "3.1.0"},
+                "lean": {"githash": "pestycyd-generated", "version": "4.35.0"},
+            }
+        },
+        {"in": 1, "str": {"pre": 0, "str": "a"}},
+        {"in": 2, "str": {"pre": 0, "str": "g"}},
+        {"in": 3, "str": {"pre": 0, "str": "h"}},
+        {"il": 1, "succ": 0},
+        {"ie": 0, "sort": 0},
+        {"ie": 1, "bvar": 0},
+        {"ie": 2, "lam": {"binderInfo": "default", "body": 1, "name": 0, "type": 0}},
+        {"ie": 3, "forallE": {"binderInfo": "default", "body": 0, "name": 0, "type": 0}},
+        {"def": {"all": [1], "levelParams": [], "name": 1, "safety": "safe", "type": 3, "value": 2, "hints": "abbrev"}},
+        {"ie": 4, "forallE": {"binderInfo": "default", "body": 3, "name": 0, "type": 3}},
+        {"ie": 5, "forallE": {"binderInfo": "default", "body": 4, "name": 0, "type": 3}},
+        {"ie": 6, "const": {"name": 1, "us": []}},
+        {"ie": 7, "lam": {"binderInfo": "default", "body": 6, "name": 0, "type": 3}},
+        {"ie": 8, "lam": {"binderInfo": "default", "body": 7, "name": 0, "type": 3}},
+        {"def": {"all": [2], "levelParams": [], "name": 2, "safety": "safe", "type": 5, "value": 8, "hints": "abbrev"}},
+        {"ie": 9, "const": {"name": 2, "us": []}},
+        {"ie": 10, "const": {"name": 1, "us": []}},
+    ]
+    nxt = 11
+    current = 10
+    for _ in range(depth):
+        lines.append({"ie": nxt, "app": {"arg": current, "fn": 9}})
+        nxt += 1
+        lines.append({"ie": nxt, "app": {"arg": 10, "fn": nxt - 1}})
+        nxt += 1
+        current = nxt - 1
+    lines.append(
+        {
+            "def": {
+                "all": [3],
+                "levelParams": [],
+                "name": 3,
+                "safety": "safe",
+                "type": 3,
+                "value": current,
+                "hints": "abbrev",
+            }
+        }
+    )
+    return "".join(json.dumps(line, separators=(",", ":")) + "\n" for line in lines)
+
+
 def con_k_params(count: int) -> str:
     """A valid Lean module stressing K-recursor parameter guards."""
     if count < 1:

@@ -7,16 +7,20 @@ import json
 import random
 import sys
 import tempfile
+import time
 import tomllib
 from collections import deque
 from pathlib import Path
+from typing import Callable
 
+from .bench import run_bench
 from .campaigns import CAMPAIGNS, selected as selected_campaigns
 from .config import Config, KernelSpec, load_config
-from .generators import con_k_params, deep_binder
+from .generators import app_spine, con_k_params, deep_binder
 from .minimize import ddmin, well_formed_export
 from .ndjson import Document, Mutation, files
 from .outcomes import Outcome
+from .rewrite import canonical_false_theorem, canonicalize
 from .runner import run_matrix, run_probe
 from .store import FindingStore, atomic_text
 
@@ -126,6 +130,14 @@ def generate_con_k(
     return 0
 
 
+def generate_app_spine(
+    _config: Config | None, _kernels: tuple[KernelSpec, ...], args: argparse.Namespace
+) -> int:
+    atomic_text(args.output, app_spine(args.depth))
+    print(f"generated app-spine depth {args.depth}: {args.output}")
+    return 0
+
+
 def matrix_command(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
     paths = files(args.paths)
     rows: list[dict[str, object]] = []
@@ -149,17 +161,89 @@ def matrix_command(config: Config, kernels: tuple[KernelSpec, ...], args: argpar
     return 1 if differences else 0
 
 
-def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
-    paths = files(args.paths)
-    campaigns = selected_campaigns(args.campaign)
-    finding_expect = dict(getattr(args, "finding_expect", ()))
+@dataclasses.dataclass
+class HuntParams:
+    paths: list[str]
+    campaigns: list[str] | None
+    iterations: int | None
+    seed: int
+    seed_policy: str
+    max_depth: int
+    max_children: int
+    semantic_only: bool = False
+    behavior_feedback: bool = False
+    feedback_depth_first: bool = False
+    protect_final_goal: bool = False
+    finding_expect: dict[str, str] = dataclasses.field(default_factory=dict)
+    finding_require_seed_change: bool = False
+    budget_seconds: float | None = None
+    workers: int | None = None
+    verbose: bool = False
+
+
+@dataclasses.dataclass
+class FindingHit:
+    attempt: int
+    digest: str
+    novel: bool
+    label: str
+    statuses: dict[str, str]
+    canonical_digest: str | None
+    canonical_false: bool
+
+
+@dataclasses.dataclass
+class HuntSummary:
+    attempts: int
+    seconds: float
+    findings: list[FindingHit]
+    coverage_inputs: int
+    feedback_features: int
+    budget_exhausted: bool
+    no_seeds: bool = False
+
+    @property
+    def novel_findings(self) -> int:
+        return sum(1 for finding in self.findings if finding.novel)
+
+
+def _compose_lineage_oracle(parent_oracle: str, mutation_oracle: str) -> str:
+    """Oracle of a child document, given the parent's and the mutation's.
+
+    A chain of validity-preserving transforms is itself validity
+    preserving, so ``guaranteed-accept`` survives composition with
+    another ``guaranteed-accept`` step; anything else is differential.
+    """
+    if (
+        parent_oracle == "guaranteed-accept"
+        and mutation_oracle == "guaranteed-accept"
+    ):
+        return "guaranteed-accept"
+    return "differential"
+
+
+def run_hunt(
+    config: Config,
+    kernels: tuple[KernelSpec, ...],
+    params: HuntParams,
+    state_root: Path,
+    notify: Callable[[str], None] | None = None,
+) -> HuntSummary:
+    def say(message: str) -> None:
+        if notify is not None:
+            notify(message)
+
+    paths = files(params.paths)
+    campaigns = selected_campaigns(params.campaigns)
+    finding_expect = dict(params.finding_expect)
     unknown = set(finding_expect).difference(kernel.name for kernel in kernels)
     if unknown:
         raise ValueError(
             f"finding expectations name unknown kernels: {', '.join(sorted(unknown))}"
         )
-    rng = random.Random(args.seed)
-    store = FindingStore(args.state or config.state)
+    started = time.perf_counter()
+    rng = random.Random(params.seed)
+    store = FindingStore(state_root)
     # Fingerprinting a checker can mean hashing a large native executable.  A hunt
     # records the same checker snapshot for every candidate, so compute it once
     # instead of re-reading every executable on every mutation.
@@ -173,6 +257,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
             tuple[dict[str, object], ...],
             frozenset[int],
             bool,
+            str,
         ]
     ] = []
     frontier_buckets: list[
@@ -185,6 +270,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                 tuple[dict[str, object], ...],
                 frozenset[int],
                 bool,
+                str,
             ]
         ]
     ] = []
@@ -205,25 +291,21 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
         try:
             document = Document.load(path)
         except (OSError, ValueError, json.JSONDecodeError) as failure:
-            print(f"SKIP {path}: {failure}")
+            say(f"SKIP {path}: {failure}")
             continue
         seen_inputs.add(hashlib.sha256(document.render().encode()).hexdigest())
-        baseline = run_matrix(kernels, path, args.workers)
-        if not seed_is_eligible(args.seed_policy, baseline):
-            print(
-                f"SKIP {path}: seed does not satisfy {args.seed_policy} policy; "
+        baseline = run_matrix(kernels, path, params.workers)
+        if not seed_is_eligible(params.seed_policy, baseline):
+            say(
+                f"SKIP {path}: seed does not satisfy {params.seed_policy} policy; "
                 f"{statuses(baseline)}"
             )
             continue
         seen_feedback.update(
-            feedback_features(
-                baseline, include_behavior=getattr(args, "behavior_feedback", False)
-            )
+            feedback_features(baseline, include_behavior=params.behavior_feedback)
         )
         protected = (
-            document.final_goal_lines()
-            if getattr(args, "protect_final_goal", False)
-            else frozenset()
+            document.final_goal_lines() if params.protect_final_goal else frozenset()
         )
         seed_matches_finding = bool(finding_expect) and matches_expectations(
             finding_expect, baseline
@@ -235,7 +317,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
             if allowed(mutation, protected)
         ]
         bucket = [
-            (path, document, mutation, 1, (), protected, seed_matches_finding)
+            (path, document, mutation, 1, (), protected, seed_matches_finding, "")
             for mutation in mutations
         ]
         rng.shuffle(bucket)
@@ -245,16 +327,31 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
             if bucket:
                 frontier.append(bucket.pop())
     if not frontier:
-        print("no accepted seed has mutations for the selected campaigns")
-        return 2
+        say("no accepted seed has mutations for the selected campaigns")
+        return HuntSummary(
+            0, time.perf_counter() - started, [], 0, len(seen_feedback), False, no_seeds=True
+        )
     queue = deque(frontier)
+    hits: list[FindingHit] = []
     findings = 0
     novel = 0
     corpus = 0
     attempts = 0
+    budget_exhausted = False
+    # A validity-preserving transform proves the child correct only when
+    # the parent was correct.  Seed policies other than "accepted" admit
+    # inputs some kernel already rejects, so the guaranteed-accept oracle
+    # would flag pre-existing rejections as completeness findings.
+    sound_accept_oracle = params.seed_policy == "accepted"
     with tempfile.TemporaryDirectory(prefix="pestycyd-hunt-") as directory:
         candidate = Path(directory) / "candidate.ndjson"
-        while queue and (args.iterations is None or attempts < args.iterations):
+        while queue and (params.iterations is None or attempts < params.iterations):
+            if (
+                params.budget_seconds is not None
+                and time.perf_counter() - started > params.budget_seconds
+            ):
+                budget_exhausted = True
+                break
             (
                 seed,
                 document,
@@ -263,13 +360,18 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                 lineage,
                 protected,
                 seed_matches_finding,
+                parent_oracle,
             ) = queue.popleft()
-            mutation = original if depth == 1 else dataclasses.replace(original, oracle="differential")
+            if depth == 1:
+                oracle = original.oracle
+                if oracle == "guaranteed-accept" and not sound_accept_oracle:
+                    oracle = "differential"
+            else:
+                oracle = _compose_lineage_oracle(parent_oracle, original.oracle)
+            mutation = original if oracle == original.oracle else dataclasses.replace(original, oracle=oracle)
             child = document.mutated(mutation)
             child_protected = (
-                child.final_goal_lines()
-                if getattr(args, "protect_final_goal", False)
-                else frozenset()
+                child.final_goal_lines() if params.protect_final_goal else frozenset()
             )
             content = child.render()
             content_digest = hashlib.sha256(content.encode()).hexdigest()
@@ -278,16 +380,13 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
             seen_inputs.add(content_digest)
             attempts += 1
             candidate.write_text(content)
-            results = run_matrix(kernels, candidate, args.workers)
+            results = run_matrix(kernels, candidate, params.workers)
             interesting, reason = is_interesting(
-                mutation, results, include_robustness=not args.semantic_only
+                mutation, results, include_robustness=not params.semantic_only
             )
             if finding_expect:
                 candidate_matches = matches_expectations(finding_expect, results)
-                inherited = (
-                    getattr(args, "finding_require_seed_change", False)
-                    and seed_matches_finding
-                )
+                inherited = params.finding_require_seed_change and seed_matches_finding
                 interesting = candidate_matches and not inherited
                 if inherited and candidate_matches:
                     reason = "seed already matched requested finding outcomes"
@@ -296,7 +395,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                 else:
                     reason = "did not match requested finding outcomes"
             features = feedback_features(
-                results, include_behavior=getattr(args, "behavior_feedback", False)
+                results, include_behavior=params.behavior_feedback
             )
             added = features.difference(seen_feedback)
             seen_feedback.update(features)
@@ -322,18 +421,44 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                 findings += 1
                 digest, created = store.save(content, metadata)
                 novel += created
-                print(f"{'FINDING' if created else 'KNOWN'} {digest[:12]} {mutation.label}: {statuses(results)}")
+                canonical = canonicalize(child)
+                canonical_digest = (
+                    hashlib.sha256(canonical.render().encode()).hexdigest()
+                    if canonical is not None
+                    else None
+                )
+                hits.append(
+                    FindingHit(
+                        attempt=attempts,
+                        digest=digest,
+                        novel=created,
+                        label=mutation.label,
+                        statuses={
+                            name: outcome.status for name, outcome in results.items()
+                        },
+                        canonical_digest=canonical_digest,
+                        canonical_false=(
+                            canonical_false_theorem(canonical)
+                            if canonical is not None
+                            else canonical_false_theorem(child)
+                        ),
+                    )
+                )
+                say(
+                    f"{'FINDING' if created else 'KNOWN'} {digest[:12]} {mutation.label}: "
+                    f"{statuses(results)}"
+                )
             if added:
                 coverage_metadata = dict(metadata)
                 coverage_metadata["reason"] = "novel search feedback"
                 digest, created = store.save_corpus(content, coverage_metadata)
                 corpus += created
                 if not interesting:
-                    print(
+                    say(
                         f"COVERAGE {digest[:12]} +{len(added)} {mutation.label}: "
                         f"{statuses(results)}"
                     )
-                if depth < args.max_depth:
+                if depth < params.max_depth:
                     descendants = [
                         next_mutation
                         for campaign in campaigns
@@ -341,7 +466,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                         if allowed(next_mutation, child_protected)
                     ]
                     rng.shuffle(descendants)
-                    descendants = descendants[: args.max_children]
+                    descendants = descendants[: params.max_children]
                     entries = [
                         (
                             seed,
@@ -351,20 +476,54 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
                             history,
                             child_protected,
                             seed_matches_finding,
+                            oracle,
                         )
                         for next_mutation in descendants
                     ]
-                    if getattr(args, "feedback_depth_first", False):
+                    if params.feedback_depth_first:
                         queue.extendleft(reversed(entries))
                     else:
                         queue.extend(entries)
-            elif args.verbose:
-                print(f"ok {attempts} {mutation.label}: {statuses(results)}")
-    print(
-        f"hunt: {attempts} mutations, {findings} interesting, {novel} novel findings, "
-        f"{corpus} coverage inputs, {len(seen_feedback)} feedback features"
+            elif params.verbose:
+                say(f"ok {attempts} {mutation.label}: {statuses(results)}")
+    return HuntSummary(
+        attempts=attempts,
+        seconds=time.perf_counter() - started,
+        findings=hits,
+        coverage_inputs=corpus,
+        feedback_features=len(seen_feedback),
+        budget_exhausted=budget_exhausted,
     )
-    return 1 if findings else 0
+
+
+def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
+    params = HuntParams(
+        paths=args.paths,
+        campaigns=args.campaign,
+        iterations=args.iterations,
+        seed=args.seed,
+        seed_policy=args.seed_policy,
+        max_depth=args.max_depth,
+        max_children=args.max_children,
+        semantic_only=args.semantic_only,
+        behavior_feedback=getattr(args, "behavior_feedback", False),
+        feedback_depth_first=getattr(args, "feedback_depth_first", False),
+        protect_final_goal=getattr(args, "protect_final_goal", False),
+        finding_expect=dict(getattr(args, "finding_expect", ())),
+        finding_require_seed_change=getattr(args, "finding_require_seed_change", False),
+        budget_seconds=getattr(args, "budget_seconds", None),
+        workers=getattr(args, "workers", None),
+        verbose=args.verbose,
+    )
+    summary = run_hunt(config, kernels, params, args.state or config.state, print)
+    print(
+        f"hunt: {summary.attempts} mutations, {len(summary.findings)} interesting, "
+        f"{summary.novel_findings} novel findings, {summary.coverage_inputs} coverage inputs, "
+        f"{summary.feedback_features} feedback features"
+    )
+    if summary.no_seeds:
+        return 2
+    return 1 if summary.findings else 0
 
 
 def parse_expect(value: str) -> tuple[str, str]:
@@ -405,6 +564,178 @@ def minimize_command(config: Config, kernels: tuple[KernelSpec, ...], args: argp
     return 0
 
 
+def reduce_command(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
+    """Delete records while preserving outcomes, renumbering tables on every trial.
+
+    Unlike ``minimize``, the predicate canonicalizes each trial first:
+    unreachable records are garbage-collected and the name, level, and
+    expression tables are renumbered densely, so deleting a record from
+    the middle of a table no longer collapses the case into a parser
+    failure.  Inputs that rely on duplicate table identifiers (for
+    example intern-table shadowing findings) fall back to plain line
+    minimization, because renumbering would erase the defect itself.
+    """
+    expected = dict(args.expect)
+    unknown = set(expected).difference(kernel.name for kernel in kernels)
+    if unknown:
+        raise ValueError(f"expectations name unknown kernels: {', '.join(sorted(unknown))}")
+    lines = args.input.read_text().splitlines()
+    parsed: list[dict[str, object]] = []
+    for line in lines:
+        if line.strip():
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise ValueError(f"{args.input}: line is not a JSON object")
+            parsed.append(value)
+    graph_mode = canonicalize(Document(tuple(parsed))) is not None
+    if not graph_mode:
+        print(
+            "reduce: duplicate table identifiers; falling back to line minimization"
+        )
+    tests = 0
+    with tempfile.TemporaryDirectory(prefix="pestycyd-reduce-") as directory:
+        candidate = Path(directory) / "candidate.ndjson"
+
+        def interesting(trial: list[str]) -> bool:
+            nonlocal tests
+            tests += 1
+            rows: list[dict[str, object]] = []
+            for line in trial:
+                if not line.strip():
+                    continue
+                try:
+                    value = json.loads(line)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return False
+                if not isinstance(value, dict):
+                    return False
+                rows.append(value)
+            if not rows:
+                return False
+            document = Document(tuple(rows))
+            if graph_mode:
+                canonical = canonicalize(document)
+                if canonical is None:
+                    return False
+            else:
+                if not args.allow_malformed and not well_formed_export(trial):
+                    return False
+                canonical = document
+            text = canonical.render()
+            if not args.allow_malformed and not well_formed_export(text.splitlines()):
+                return False
+            candidate.write_text(text)
+            results = run_matrix(kernels, candidate, args.workers)
+            return all(results[name].status == status for name, status in expected.items())
+
+        if not interesting(lines):
+            print("input does not satisfy the requested outcomes", file=sys.stderr)
+            return 2
+        reduced = ddmin(lines, interesting, tuple(args.keep))
+    final_rows: list[dict[str, object]] = []
+    for line in reduced:
+        if line.strip():
+            final_rows.append(json.loads(line))
+    final = Document(tuple(final_rows))
+    if graph_mode:
+        final = canonicalize(final) or final
+    atomic_text(args.output, final.render())
+    print(
+        f"reduced {len(lines)} -> {len(final.lines)} records in {tests} tests "
+        f"({'graph' if graph_mode else 'line'} mode): {args.output}"
+    )
+    return 0
+
+
+def bench_command(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
+    return run_bench(config, args)
+
+
+def findings_command(config: Config, _kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
+    """Group stored findings by their canonicalized case.
+
+    Content digests count inputs; clustering counts defects.  Two findings
+    whose documents canonicalize to the same bytes are the same case in a
+    different presentation (extra unreachable records, a different but
+    equivalent mutation path), so the report groups them under one key.
+    """
+    root = args.state or config.state
+    findings_dir = root / "findings"
+    cases = sorted(findings_dir.glob("*.ndjson"))
+    if not cases:
+        print(f"findings: none stored under {findings_dir}")
+        return 0
+    clusters: dict[str, list[dict[str, object]]] = {}
+    for case in cases:
+        sidecar = case.with_suffix(".json")
+        metadata: dict[str, object] = {}
+        if sidecar.exists():
+            try:
+                loaded = json.loads(sidecar.read_text())
+                if isinstance(loaded, dict):
+                    metadata = loaded
+            except (OSError, ValueError, json.JSONDecodeError):
+                metadata = {}
+        entry: dict[str, object] = {"file": str(case)}
+        try:
+            document = Document.load(case)
+        except (OSError, ValueError, json.JSONDecodeError) as failure:
+            entry["error"] = str(failure)
+            key = f"unreadable:{case.name}"
+        else:
+            canonical = canonicalize(document)
+            if canonical is None:
+                key = f"noncanonical:{hashlib.sha256(case.read_bytes()).hexdigest()}"
+                entry["noncanonical"] = (
+                    "duplicate table identifiers; reduced as-is"
+                )
+            else:
+                key = canonical.render()
+                key = f"canonical:{hashlib.sha256(key.encode()).hexdigest()}"
+            entry["canonical_false"] = canonical_false_theorem(document)
+        entry["sidecar"] = metadata
+        clusters.setdefault(key, []).append(entry)
+
+    ordered = sorted(clusters.items(), key=lambda item: (-len(item[1]), item[0]))
+    print(f"findings: {len(cases)} inputs collapse into {len(ordered)} cluster(s)")
+    report: dict[str, object] = {"schema": "pestycyd-findings-1", "clusters": []}
+    for key, entries in ordered:
+        first = entries[0]
+        sidecar = first.get("sidecar") if isinstance(first.get("sidecar"), dict) else {}
+        results = sidecar.get("results") if isinstance(sidecar.get("results"), dict) else {}
+        statuses = {
+            name: value.get("status") if isinstance(value, dict) else None
+            for name, value in results.items()
+        }
+        campaign = None
+        mutation = sidecar.get("mutation")
+        if isinstance(mutation, dict):
+            campaign = mutation.get("campaign")
+        row: dict[str, object] = {
+            "cluster": key,
+            "findings": len(entries),
+            "files": [entry["file"] for entry in entries],
+            "statuses": statuses,
+            "campaign": campaign,
+            "canonical_false": bool(first.get("canonical_false")),
+        }
+        report["clusters"].append(row)
+        flags = []
+        if row["canonical_false"]:
+            flags.append("∀P:Prop,P")
+        if key.startswith("noncanonical:"):
+            flags.append("noncanonical")
+        suffix = f" [{', '.join(flags)}]" if flags else ""
+        print(
+            f"  {len(entries):4d} × {key[-12:]}{suffix} "
+            f"{statuses} campaign={campaign}"
+        )
+    if args.report:
+        atomic_text(args.report, json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        print(f"findings report: {args.report}")
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="pestycyd", description="Pest control for Lean kernels")
     root.add_argument("--config", type=Path, default=Path("pestycyd.toml"))
@@ -428,6 +759,12 @@ def parser() -> argparse.ArgumentParser:
     generator.add_argument("count", type=int)
     generator.add_argument("output", type=Path)
     generator.set_defaults(function=generate_con_k, no_config=True)
+    generator = generators.add_parser(
+        "app-spine", help="valid NDJSON export with a deeply nested application spine"
+    )
+    generator.add_argument("depth", type=int)
+    generator.add_argument("output", type=Path)
+    generator.set_defaults(function=generate_app_spine, no_config=True)
 
     command = sub.add_parser("matrix", help="run inputs through a kernel matrix")
     command.add_argument("paths", nargs="+")
@@ -504,6 +841,12 @@ def parser() -> argparse.ArgumentParser:
             "matched the requested outcomes"
         ),
     )
+    command.add_argument(
+        "--budget-seconds",
+        type=float,
+        default=None,
+        help="stop mutating after this many seconds of wall time",
+    )
     command.add_argument("--verbose", action="store_true")
     command.set_defaults(function=hunt)
 
@@ -518,6 +861,39 @@ def parser() -> argparse.ArgumentParser:
         help="allow deletion of required back-reference records when minimizing parser bugs",
     )
     command.set_defaults(function=minimize_command)
+
+    command = sub.add_parser(
+        "reduce",
+        help="delete records while renumbering tables, preserving outcomes",
+    )
+    command.add_argument("input", type=Path)
+    command.add_argument("output", type=Path)
+    command.add_argument("--expect", action="append", type=parse_expect, required=True)
+    command.add_argument("--keep", action="append", default=[])
+    command.add_argument(
+        "--allow-malformed",
+        action="store_true",
+        help="skip the well-formedness check on each canonicalized trial",
+    )
+    command.set_defaults(function=reduce_command)
+
+    command = sub.add_parser(
+        "bench",
+        help="measure whether hunts reproduce pinned historical defect scenarios",
+    )
+    command.add_argument("scenarios", type=Path)
+    command.add_argument("--filter", action="append", help="run only named scenarios; repeatable")
+    command.add_argument("--report", type=Path)
+    command.add_argument("--state", type=Path)
+    command.set_defaults(function=bench_command)
+
+    command = sub.add_parser(
+        "findings",
+        help="group stored findings by their canonicalized case",
+    )
+    command.add_argument("--report", type=Path)
+    command.add_argument("--state", type=Path)
+    command.set_defaults(function=findings_command)
     return root
 
 

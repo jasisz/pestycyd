@@ -1,0 +1,75 @@
+# Pestycyd discovery benchmark scenarios.
+#
+# A scenario pins a historical defect family WITHOUT handing the tool the
+# reproduction: a correct seed, a campaign selection, a fixed budget, and
+# the outcome vector that identifies the bug class.  Kernel binaries come
+# from the active pestycyd.toml, so the same scenario measures a suspect
+# build and its repaired successor.
+#
+# Run with:
+#   uv run pestycyd --config pestycyd.toml bench bench/scenarios.toml \
+#     --report bench-report.json
+#
+# Escalation: "forall-prop-prop" additionally reports whether any finding
+# closed the canonical false theorem (structurally detected, axiom-free,
+# safe fragment only).
+
+version = 1
+
+# The closure-context family (sokonanoda #8 / MathGraph closure-mode bug):
+# a correct Pi/lambda seed; expression rewiring historically rediscovered
+# the bug on MathGraph without target-source guidance.
+[scenario.closure-context]
+description = "Closure-context comparison: Pi type vs lambda value under matching binders"
+kernels = ["official", "mathgraph"]
+seed = "../corpus/good/dependent-id.ndjson"
+campaigns = ["expression-structure-full", "goal-value-splicing", "typed-neighborhood-crosswire"]
+iterations = 400
+budget_seconds = 900
+finding = ["official=reject", "mathgraph=accept"]
+escalation = "forall-prop-prop"
+
+# The same family against Sokonanoda proper.
+[scenario.closure-context-sokonanoda]
+description = "Closure-context comparison against Sokonanoda (issue #8 family)"
+kernels = ["official", "sokonanoda"]
+seed = "../corpus/good/dependent-id.ndjson"
+campaigns = ["expression-structure-full", "goal-value-splicing", "typed-neighborhood-crosswire"]
+iterations = 400
+budget_seconds = 900
+finding = ["official=reject", "sokonanoda=accept"]
+escalation = "forall-prop-prop"
+
+# Level-substitution family (sokonanoda #9): universe parameters flowing
+# through closures.  The proof-parameter recursor seed exercises imported
+# recursors with universe-polymorphic declarations and a real consumer.
+[scenario.level-substitution-sokonanoda]
+description = "Closure universe substitution (issue #9 family)"
+kernels = ["official", "sokonanoda"]
+seed = "../corpus/good/proof-param-rec-consumer.ndjson"
+campaigns = ["const-universe-crosswire", "universe-structure", "expression-structure-full"]
+iterations = 400
+budget_seconds = 900
+finding = ["official=reject", "sokonanoda=accept"]
+
+# Completeness control: validity-preserving rewrites must never be
+# rejected.  No finding vector is pinned — the guaranteed-accept oracle
+# itself defines the interesting event (any kernel failing to accept).
+# A FINDING here means the tool caught a completeness regression.
+[scenario.metamorphic-completeness]
+description = "guaranteed-accept control: metamorphic rewrites rejected by any kernel"
+kernels = ["official", "sokonanoda", "mathgraph"]
+paths = [
+  "../corpus/good/dependent-id.ndjson",
+  "../corpus/good/proof-param-rec-consumer.ndjson",
+]
+campaigns = [
+  "metamorphic-beta",
+  "metamorphic-let",
+  "metamorphic-rename",
+  "expression-unsharing",
+  "declaration-reordering",
+]
+iterations = 300
+budget_seconds = 600
+seed_rnd = 7

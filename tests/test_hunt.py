@@ -10,10 +10,12 @@ from pathlib import Path
 from unittest import mock
 
 from pestycyd.cli import (
+    HuntParams,
     feedback_features,
     hunt,
     is_interesting,
     matches_expectations,
+    run_hunt,
     seed_is_eligible,
 )
 from pestycyd.config import Config, FeedbackSpec, KernelSpec
@@ -194,6 +196,83 @@ class HuntTests(unittest.TestCase):
             ]
 
         self.assertEqual([run["depth"] for run in runs], [1, 2])
+
+    def test_guaranteed_accept_oracle_needs_accepted_seeds(self) -> None:
+        """guaranteed-accept must not fire on seeds a kernel already rejects.
+
+        Seed policies beyond "accepted" admit rejected inputs; a rejection
+        there predates the mutation, so flagging it would manufacture a
+        false completeness finding.  The oracle downgrades to differential.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            seed = root / "seed.ndjson"
+            seed.write_text(
+                '{"meta":{}}\n'
+                '{"ie":0,"sort":0}\n'
+                '{"ie":1,"bvar":0}\n'
+                '{"thm":{"all":[],"levelParams":[],"name":0,"type":0,"value":1}}\n'
+            )
+            kernel = KernelSpec(
+                name="target",
+                command=(sys.executable, "-c", "print('rejected'); raise SystemExit(1)", "{file}"),
+                cwd=root,
+                timeout=5.0,
+                verdict="required",
+            )
+            state = root / "state"
+            config = Config(path=root / "pestycyd.toml", state=state, kernels=(kernel,))
+            args = argparse.Namespace(
+                paths=[str(seed)],
+                campaign=["metamorphic-beta"],
+                seed=3,
+                state=None,
+                workers=None,
+                iterations=2,
+                max_depth=1,
+                max_children=32,
+                seed_policy="any",
+                semantic_only=True,
+                verbose=False,
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                result = hunt(config, (kernel,), args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(list((state / "findings").glob("*.ndjson")), [])
+
+    def test_budget_seconds_stops_the_hunt(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            seed = root / "seed.ndjson"
+            seed.write_text('{"idx":2}\n')
+            script = (
+                "import time, sys; time.sleep(0.05); print('accepted')"
+            )
+            kernel = KernelSpec(
+                name="target",
+                command=(sys.executable, "-c", script, "{file}"),
+                cwd=root,
+                timeout=30.0,
+                verdict="required",
+            )
+            config = Config(path=root / "pestycyd.toml", state=root / "state", kernels=(kernel,))
+            params = HuntParams(
+                paths=[str(seed)],
+                campaigns=["metadata-boundaries"],
+                iterations=100,
+                seed=7,
+                seed_policy="accepted",
+                max_depth=1,
+                max_children=32,
+                budget_seconds=0.2,
+            )
+            summary = run_hunt(config, (kernel,), params, root / "state", None)
+
+        self.assertTrue(summary.budget_exhausted)
+        self.assertLess(summary.attempts, 100)
 
     def test_semantic_only_ignores_reject_versus_internal_error(self) -> None:
         mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")

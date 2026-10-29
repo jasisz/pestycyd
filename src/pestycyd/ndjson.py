@@ -43,6 +43,24 @@ class LineEdit:
 
 
 @dataclass(frozen=True)
+class Rewrite:
+    """A declarative, document-level transform applied instead of field edits."""
+
+    kind: str
+    line: int
+    path: tuple[object, ...] = ()
+    params: tuple[object, ...] = ()
+
+    def json(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "line": self.line + 1,
+            "path": list(self.path),
+            "params": list(self.params),
+        }
+
+
+@dataclass(frozen=True)
 class Mutation:
     campaign: str
     label: str
@@ -56,6 +74,7 @@ class Mutation:
     edits: tuple[Edit, ...] = ()
     delete: bool = False
     line_edits: tuple[LineEdit, ...] = ()
+    rewrite: Rewrite | None = None
 
     def json(self) -> dict[str, object]:
         return {
@@ -71,6 +90,7 @@ class Mutation:
             "edits": [edit.json() for edit in self.edits],
             "delete": self.delete,
             "line_edits": [edit.json() for edit in self.line_edits],
+            "rewrite": None if self.rewrite is None else self.rewrite.json(),
         }
 
 
@@ -144,6 +164,10 @@ class Document:
         return frozenset(protected)
 
     def mutated(self, mutation: Mutation) -> "Document":
+        if mutation.rewrite is not None:
+            from .transforms import apply_rewrite
+
+            return apply_rewrite(self, mutation.rewrite)
         end = len(self.lines) if mutation.end_line is None else mutation.end_line + 1
         changed = copy.deepcopy(list(self.lines[:end]))
         edits = (

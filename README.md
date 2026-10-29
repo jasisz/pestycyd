@@ -39,6 +39,11 @@ uv run pestycyd --config pestycyd.toml hunt corpus/regressions \
   --seed-policy consensus --iterations 1000
 uv run pestycyd --config pestycyd.toml minimize finding.ndjson minimal.ndjson \
   --expect official=reject --expect nanoda=accept
+uv run pestycyd --config pestycyd.toml reduce finding.ndjson minimal.ndjson \
+  --expect official=reject --expect nanoda=accept
+uv run pestycyd --config pestycyd.toml findings --report clusters.json
+uv run pestycyd --config pestycyd.toml bench bench/scenarios.toml \
+  --report bench-report.json
 ```
 
 `uv.lock` is committed; normal development and CI use `uv run --locked ...`.
@@ -196,6 +201,27 @@ the sidecar as `seed_matched_finding_expectations`.
 `--feedback-depth-first` runs children of a coverage- or behavior-expanding
 input immediately, which is useful for multi-step escalation from a near-miss;
 the default breadth-first schedule remains better for broad corpus discovery.
+`--budget-seconds` stops the loop after a wall-time budget, which keeps large
+campaigns inside a fixed test window.
+
+The oracle and the seed policy interact. `guaranteed-accept` proves the child
+correct only when the parent was correct, so it is sound exactly under the
+default `accepted` policy; under any other policy Pestycyd silently downgrades
+those mutations to `differential` instead of manufacturing findings from
+rejections that predate the mutation. Chains composed entirely of
+validity-preserving steps keep the stronger oracle at depth two and beyond.
+
+Two name-sensitive mechanisms also constrain the metamorphic campaigns.
+Kernel-derived names make declaration order semantic: processing an
+inductive checks `<ind>.rec` and generates `_nested.*` against the
+environment as it goes, and the official kernel — like Lean itself —
+rejects a block whose recursor name is already taken, so
+`declaration-reordering` only swaps plain declarations (no `inductive` or
+`quot` partners, no `_nested`/`.rec`-shaped names). And checkers key
+native reduction on trusted names (`Nat.add`, `String.append`, ...), so
+`metamorphic-rename` never renames a declaration rooted at such a family:
+the rewrite would change what the checker trusts, not how the proof is
+presented.
 
 ## Built-in corpus and generators
 
@@ -229,6 +255,70 @@ already-used intern ID immediately before a declaration consumes it.
 checked-in `prop-recursor-derived-field-swap.ndjson` is a negative control, not
 a soundness finding: those fields are derived from the inductive declaration,
 so a checker may safely derive and ignore them.
+
+The metamorphic campaigns are the first built-in users of the
+`guaranteed-accept` oracle. Each applies a validity-preserving rewrite —
+`metamorphic-beta` wraps a declaration value in an identity application,
+`metamorphic-let` in a redundant `let`, `metamorphic-eta` expands a Pi-typed
+value to `fun x => v x`, `metamorphic-rename` renames a declaration
+consistently to a fresh name, `expression-unsharing` rebuilds a shared value
+DAG as a private copy, and `declaration-reordering` moves a declaration past
+an independent neighbour — so any rejection is a completeness finding. The
+rewrites are real graph transformations: inserted expression records force a
+dense renumbering of the whole export, which the `pestycyd.rewrite` core
+performs while rewriting every back-reference.
+
+## Reduction, clustering, and escalation detection
+
+`minimize` deletes lines; `reduce` deletes *records*. On every trial, `reduce`
+garbage-collects records unreachable from the declarations and renumbers the
+name, level, and expression tables densely, so a deletion from the middle of a
+table no longer collapses the case into an unrelated parser failure. Inputs
+that rely on duplicate table identifiers — intern-table shadowing findings —
+fall back to plain line minimization, because renumbering would erase the
+defect under study:
+
+```bash
+uv run pestycyd --config pestycyd.toml reduce finding.ndjson minimal.ndjson \
+  --expect official=reject --expect nanoda=accept
+```
+
+The same canonicalization powers `findings`, which answers "how many distinct
+defects did this hunt produce?" instead of "how many files?". Findings whose
+documents canonicalize to identical bytes are the same case in a different
+presentation and are reported as one cluster:
+
+```bash
+uv run pestycyd --config pestycyd.toml findings --report clusters.json
+```
+
+Both commands also flag `∀ P : Prop, P` — the canonical escalation target —
+detected structurally: the final theorem's goal (through level-free
+definition unfolding) is either that binder shape or a constant of an
+inductive with zero constructors in `Prop`, in an axiom-free, safe-fragment
+document. The check is immune to name shadowing by construction.
+
+## Discovery benchmark
+
+`bench/scenarios.toml` pins historical defect families without handing the
+tool the reproduction. Each scenario selects kernels from the active config, a
+correct seed, campaigns, a fixed budget, and — for differential scenarios —
+the outcome vector that identifies the bug; a `guaranteed-accept` scenario
+pins no vector and lets the oracle define the finding. The report records
+whether the hunt reached its target, after how many attempts, how many
+canonical clusters it produced, and whether any finding closed the canonical
+false theorem:
+
+```bash
+uv run pestycyd --config pestycyd.toml bench bench/scenarios.toml \
+  --report bench-report.json
+```
+
+Pinning checker versions is deliberately outside the scenario file: kernels
+come from the config, so the same scenarios measure a suspect build and its
+repaired successor. This is how changes to Pestycyd itself — a new campaign,
+scheduler, or feedback scheme — earn their keep: run the benchmark before and
+after and compare `found`, `first_finding.attempt`, and the cluster count.
 
 ## Findings
 

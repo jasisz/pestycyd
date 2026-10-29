@@ -5,7 +5,12 @@ from collections import deque
 from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
-from .ndjson import Document, Edit, LineEdit, Mutation, walk_objects
+from .ndjson import Document, Edit, LineEdit, Mutation, Rewrite, walk_objects
+from .transforms import (
+    clonable_value,
+    rename_safe,
+    swap_independent_declarations,
+)
 
 
 DECLARATION_KINDS = ("axiom", "def", "thm", "opaque")
@@ -1588,6 +1593,151 @@ def declaration_shadow_copy(document: Document) -> Iterable[Mutation]:
         )
 
 
+def _typed_value_declarations(document: Document) -> Iterable[tuple[int, str]]:
+    """Safe declarations with serialized types and values, wrappable on the right."""
+    for line_no, line in enumerate(document.lines):
+        for kind in ("def", "thm"):
+            declaration = line.get(kind)
+            if not isinstance(declaration, dict) or not _safe(kind, declaration):
+                continue
+            if isinstance(declaration.get("type"), int) and isinstance(
+                declaration.get("value"), int
+            ):
+                yield line_no, kind
+
+
+def _sole_name_declaration(document: Document, line_no: int, kind: str) -> bool:
+    name = document.lines[line_no][kind].get("name")
+    if not isinstance(name, int) or isinstance(name, bool) or name == 0:
+        return False
+    users = 0
+    for line in document.lines:
+        for other_kind in DECLARATION_KINDS:
+            payload = line.get(other_kind)
+            if isinstance(payload, dict) and payload.get("name") == name:
+                users += 1
+        block = line.get("inductive")
+        if isinstance(block, dict):
+            for group in ("types", "ctors", "recs"):
+                items = block.get(group)
+                if isinstance(items, list):
+                    users += sum(
+                        1
+                        for item in items
+                        if isinstance(item, dict) and item.get("name") == name
+                    )
+    return users == 1
+
+
+def metamorphic_beta(document: Document) -> Iterable[Mutation]:
+    """Wrap declaration values in an identity application.
+
+    ``T := v`` becomes ``T := (fun x : T => x) v``.  Well-typedness of the
+    wrapper follows from the seed being correct, so any checker rejecting
+    the result has a completeness bug — the ``guaranteed-accept`` oracle.
+    """
+    for line_no, kind in _typed_value_declarations(document):
+        yield Mutation(
+            "metamorphic-beta", f"{kind}-identity-application", "guaranteed-accept",
+            line_no, (kind,), "document", "wrap-beta",
+            "identity application preserves the declaration value",
+            rewrite=Rewrite("wrap-beta", line_no, (kind,)),
+        )
+
+
+def metamorphic_let(document: Document) -> Iterable[Mutation]:
+    """Wrap declaration values in a redundant let binding.
+
+    ``T := v`` becomes ``T := let x : T := v; x``.  Exercises let unfolding,
+    local contexts, and de Bruijn handling on an otherwise unchanged proof.
+    """
+    for line_no, kind in _typed_value_declarations(document):
+        yield Mutation(
+            "metamorphic-let", f"{kind}-redundant-let", "guaranteed-accept",
+            line_no, (kind,), "document", "wrap-let",
+            "redundant let binding preserves the declaration value",
+            rewrite=Rewrite("wrap-let", line_no, (kind,)),
+        )
+
+
+def metamorphic_eta(document: Document) -> Iterable[Mutation]:
+    """Eta-expand declaration values whose type is a Pi.
+
+    ``T := v`` with ``T = ∀ x : A, B`` becomes ``T := fun x => v x``.
+    Eta is definitional, so the rewrite preserves the declaration; it
+    exercises whnf, application inference, and closure construction on
+    a proof that suddenly grows a binder.
+    """
+    table = {
+        line["ie"]: line
+        for line in document.lines
+        if isinstance(line.get("ie"), int) and not isinstance(line.get("ie"), bool)
+    }
+    for line_no, kind in _typed_value_declarations(document):
+        type_id = document.lines[line_no][kind]["type"]
+        forall = table.get(type_id)
+        if not isinstance(forall, dict) or not isinstance(forall.get("forallE"), dict):
+            continue
+        yield Mutation(
+            "metamorphic-eta", f"{kind}-eta-expansion", "guaranteed-accept",
+            line_no, (kind,), "document", "wrap-eta",
+            "eta expansion preserves the declaration value",
+            rewrite=Rewrite("wrap-eta", line_no, (kind,)),
+        )
+
+
+def metamorphic_rename(document: Document) -> Iterable[Mutation]:
+    """Consistently rename a declaration to a fresh, previously unused name.
+
+    Declarations rooted at trusted-primitive name families (Nat, String,
+    Quot, ...) are excluded: checkers key native reduction on those names,
+    so renaming one changes what the document means rather than how it is
+    presented.
+    """
+    for line_no, line in enumerate(document.lines):
+        for kind in DECLARATION_KINDS:
+            if not isinstance(line.get(kind), dict) or not _safe(kind, line[kind]):
+                continue
+            if not _sole_name_declaration(document, line_no, kind):
+                continue
+            if not rename_safe(document, line[kind]["name"]):
+                continue
+            yield Mutation(
+                "metamorphic-rename", f"{kind}-fresh-name", "guaranteed-accept",
+                line_no, (kind,), "document", "rename-declaration",
+                "consistent renaming preserves meaning",
+                rewrite=Rewrite("rename-declaration", line_no, (kind,)),
+            )
+
+
+def expression_unsharing(document: Document) -> Iterable[Mutation]:
+    """Clone a shared value DAG into a private, structurally identical copy."""
+    for line_no, kind in _typed_value_declarations(document):
+        if not clonable_value(document, line_no, (kind,)):
+            continue
+        yield Mutation(
+            "expression-unsharing", f"{kind}-private-value-dag", "guaranteed-accept",
+            line_no, (kind,), "document", "clone-value-dag",
+            "duplicated subterms preserve the declaration value",
+            rewrite=Rewrite("clone-value-dag", line_no, (kind,)),
+        )
+
+
+def declaration_reordering(document: Document) -> Iterable[Mutation]:
+    """Swap a declaration with the next, name-independent declaration."""
+    for line_no, line in enumerate(document.lines):
+        if not _is_declaration(line):
+            continue
+        if not swap_independent_declarations(document, line_no):
+            continue
+        yield Mutation(
+            "declaration-reordering", "swap-independent-pair", "guaranteed-accept",
+            line_no, (), "document", "swap-declarations",
+            "independent declaration order preserves meaning",
+            rewrite=Rewrite("swap-declarations", line_no),
+        )
+
+
 BOUNDARY_FIELDS = {
     "bvar",
     "idx",
@@ -1791,6 +1941,42 @@ CAMPAIGNS: dict[str, Campaign] = {
         "Mutate inductive metadata while preserving all dependent declarations and theorems.",
         ("end-to-end recursor use", "inductive validation", "K-recursion guards"),
         inductive_structure_full,
+    ),
+    "metamorphic-beta": Campaign(
+        "metamorphic-beta", "guaranteed-accept",
+        "Wrap declaration values in an identity application: v becomes (fun x : T => x) v.",
+        ("whnf", "beta reduction", "application inference"),
+        metamorphic_beta,
+    ),
+    "metamorphic-let": Campaign(
+        "metamorphic-let", "guaranteed-accept",
+        "Wrap declaration values in a redundant let binding: v becomes let x : T := v; x.",
+        ("let unfolding", "local context handling", "de Bruijn indices"),
+        metamorphic_let,
+    ),
+    "metamorphic-eta": Campaign(
+        "metamorphic-eta", "guaranteed-accept",
+        "Eta-expand Pi-typed declaration values: v becomes fun x => v x.",
+        ("eta in defEq", "whnf", "closure construction", "application inference"),
+        metamorphic_eta,
+    ),
+    "metamorphic-rename": Campaign(
+        "metamorphic-rename", "guaranteed-accept",
+        "Consistently rename one declaration to a fresh, previously unused name.",
+        ("constant identity", "environment insertion", "name interning"),
+        metamorphic_rename,
+    ),
+    "expression-unsharing": Campaign(
+        "expression-unsharing", "guaranteed-accept",
+        "Rebuild a shared value DAG as a private copy of the same term.",
+        ("sharing-sensitive caches", "hash consing", "structural identity"),
+        expression_unsharing,
+    ),
+    "declaration-reordering": Campaign(
+        "declaration-reordering", "guaranteed-accept",
+        "Swap adjacent declarations that reference none of each other's names.",
+        ("environment order", "cache invalidation", "declaration replay"),
+        declaration_reordering,
     ),
 }
 
