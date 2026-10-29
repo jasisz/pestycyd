@@ -1,0 +1,258 @@
+{
+  "seed": "/Users/szymon.tezewski/PycharmProjects/pestycyd/corpus/good/proof-param-rec-consumer.ndjson",
+  "mutation": {
+    "campaign": "intern-table-shadowing",
+    "label": "ie-19-from-line-48-before-53",
+    "oracle": "differential",
+    "line": 33,
+    "path": [],
+    "field": "ie",
+    "value": 19,
+    "target": "duplicate expression intern key and environment consumption",
+    "end_line": null,
+    "edits": [],
+    "delete": false,
+    "line_edits": [
+      {
+        "kind": "insert",
+        "line": 53,
+        "value": {
+          "ie": 19,
+          "lam": {
+            "binderInfo": "default",
+            "body": 1,
+            "name": 10,
+            "type": 22
+          }
+        }
+      }
+    ],
+    "rewrite": null
+  },
+  "lineage": [
+    {
+      "campaign": "intern-table-shadowing",
+      "label": "ie-19-from-line-48-before-53",
+      "oracle": "differential",
+      "line": 33,
+      "path": [],
+      "field": "ie",
+      "value": 19,
+      "target": "duplicate expression intern key and environment consumption",
+      "end_line": null,
+      "edits": [],
+      "delete": false,
+      "line_edits": [
+        {
+          "kind": "insert",
+          "line": 53,
+          "value": {
+            "ie": 19,
+            "lam": {
+              "binderInfo": "default",
+              "body": 1,
+              "name": 10,
+              "type": 22
+            }
+          }
+        }
+      ],
+      "rewrite": null
+    }
+  ],
+  "depth": 1,
+  "protected_goal_lines": [],
+  "seed_matched_finding_expectations": false,
+  "reason": "kernel robustness failure",
+  "feedback": {
+    "new": 0,
+    "new_features": [],
+    "new_features_truncated": false,
+    "total_seen": 0
+  },
+  "kernels": [
+    {
+      "name": "pestka-old",
+      "command": [
+        "../pestka/.build/target/release/main",
+        "{file}",
+        "1",
+        "old"
+      ],
+      "cwd": "/Users/szymon.tezewski/PycharmProjects/pestycyd",
+      "timeout": 20.0,
+      "verdict": "required",
+      "enabled": true,
+      "exit_codes": {},
+      "env": {},
+      "probe": null,
+      "feedback": null,
+      "executable": {
+        "path": "/Users/szymon.tezewski/PycharmProjects/pestka/.build/target/release/main",
+        "sha256": "2962eba5b93fbc6a5658cba9f8267947706013536280776e4efc8eedd1d5493f",
+        "bytes": 4616448
+      }
+    },
+    {
+      "name": "pestka-next",
+      "command": [
+        "../pestka/.build/target/release/main",
+        "{file}",
+        "1",
+        "next"
+      ],
+      "cwd": "/Users/szymon.tezewski/PycharmProjects/pestycyd",
+      "timeout": 20.0,
+      "verdict": "required",
+      "enabled": true,
+      "exit_codes": {},
+      "env": {},
+      "probe": null,
+      "feedback": null,
+      "executable": {
+        "path": "/Users/szymon.tezewski/PycharmProjects/pestka/.build/target/release/main",
+        "sha256": "2962eba5b93fbc6a5658cba9f8267947706013536280776e4efc8eedd1d5493f",
+        "bytes": 4616448
+      }
+    },
+    {
+      "name": "nanoda",
+      "command": [
+        "adapters/nanoda/run",
+        "/Users/szymon.tezewski/.elan/toolchains/leanprover--lean4---v4.35.0/bin/nanoda_bin",
+        "{file}"
+      ],
+      "cwd": "/Users/szymon.tezewski/PycharmProjects/pestycyd",
+      "timeout": 20.0,
+      "verdict": "none",
+      "enabled": true,
+      "exit_codes": {},
+      "env": {
+        "NANODA_RAW_STATUS": "1"
+      },
+      "probe": null,
+      "feedback": null,
+      "executable": {
+        "path": "/Users/szymon.tezewski/PycharmProjects/pestycyd/adapters/nanoda/run",
+        "sha256": "65bcb915532d758355e73a33568a865f850110f25e298de6af3e1f42c9f13626",
+        "bytes": 613
+      }
+    },
+    {
+      "name": "lean4lean",
+      "command": [
+        "/Users/szymon.tezewski/.elan/toolchains/leanprover--lean4---v4.35.0/bin/lean4lean",
+        "--import",
+        "{file}"
+      ],
+      "cwd": "/Users/szymon.tezewski/PycharmProjects/pestycyd",
+      "timeout": 20.0,
+      "verdict": "none",
+      "enabled": true,
+      "exit_codes": {},
+      "env": {},
+      "probe": null,
+      "feedback": null,
+      "executable": {
+        "path": "/Users/szymon.tezewski/.elan/toolchains/leanprover--lean4---v4.35.0/bin/lean4lean",
+        "sha256": "5d9522abac7f701e7b5324c96b0be5b0091d5d557b558d2a023d950688eccdea",
+        "bytes": 29938992
+      }
+    },
+    {
+      "name": "con-leche",
+      "command": [
+        "/Users/szymon.tezewski/.elan/toolchains/leanprover--lean4---v4.35.0/bin/con-leche",
+        "--jobs=1",
+        "{file}"
+      ],
+      "cwd": "/Users/szymon.tezewski/PycharmProjects/pestycyd",
+      "timeout": 60.0,
+      "verdict": "none",
+      "enabled": true,
+      "exit_codes": {},
+      "env": {},
+      "probe": null,
+      "feedback": null,
+      "executable": {
+        "path": "/Users/szymon.tezewski/.elan/toolchains/leanprover--lean4---v4.35.0/bin/con-leche",
+        "sha256": "4dc91239adc01a07a8d974bad720d68a316ed21aef73847bb74a191696304e34",
+        "bytes": 10896512
+      }
+    },
+    {
+      "name": "con-ron",
+      "command": [
+        "/Users/szymon.tezewski/.elan/toolchains/leanprover--lean4---v4.35.0/bin/con-ron",
+        "--jobs=1",
+        "{file}"
+      ],
+      "cwd": "/Users/szymon.tezewski/PycharmProjects/pestycyd",
+      "timeout": 60.0,
+      "verdict": "none",
+      "enabled": true,
+      "exit_codes": {},
+      "env": {},
+      "probe": null,
+      "feedback": null,
+      "executable": {
+        "path": "/Users/szymon.tezewski/.elan/toolchains/leanprover--lean4---v4.35.0/bin/con-ron",
+        "sha256": "ea4213f72b8c124c1fe1802ae85a16fe60f6cdd73c3ede7bd38d07fdbab924b8",
+        "bytes": 2631792
+      }
+    }
+  ],
+  "results": {
+    "pestka-old": {
+      "status": "accept",
+      "seconds": 0.009387,
+      "exit_code": 0,
+      "verdict": "accept",
+      "fingerprint": "30c2394c826e72c1",
+      "output": "constants 4, declarations 2, names 12, levels 3, expressions 59\nchecked 2, admitted unchecked 0, skipped 0\naccepted\n"
+    },
+    "pestka-next": {
+      "status": "accept",
+      "seconds": 0.007478,
+      "exit_code": 0,
+      "verdict": "accept",
+      "fingerprint": "30c2394c826e72c1",
+      "output": "constants 4, declarations 2, names 12, levels 3, expressions 59\nchecked 2, admitted unchecked 0, skipped 0\naccepted\n"
+    },
+    "nanoda": {
+      "status": "crash",
+      "seconds": 0.023035,
+      "exit_code": 101,
+      "verdict": null,
+      "fingerprint": "28971107ed6c3de3",
+      "output": "\nthread 'main' (25391789) panicked at src/parser.rs:120:13:\nAttempted to insert duplicate Expr\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n"
+    },
+    "lean4lean": {
+      "status": "accept",
+      "seconds": 0.023521,
+      "exit_code": 0,
+      "verdict": null,
+      "fingerprint": "f855cb08e11b79e3",
+      "output": "checked 2 declarations\n"
+    },
+    "con-leche": {
+      "status": "error",
+      "seconds": 0.011026,
+      "exit_code": 3,
+      "verdict": null,
+      "fingerprint": "44b0255aec58d2f9",
+      "output": "con-leche: /private/var/folders/k7/642nkdzx6k14y98bcg4bxrmr0000gp/T/pestycyd-hunt-xm5wyxf7/candidate.ndjson:53: expression index 19 is already bound\n"
+    },
+    "con-ron": {
+      "status": "error",
+      "seconds": 0.006083,
+      "exit_code": 3,
+      "verdict": null,
+      "fingerprint": "eaac07e348a8d9e5",
+      "output": "con-ron: /private/var/folders/k7/642nkdzx6k14y98bcg4bxrmr0000gp/T/pestycyd-hunt-xm5wyxf7/candidate.ndjson:53: expression index 19 is already bound\n"
+    }
+  },
+  "schema": "pestycyd-finding-1",
+  "sha256": "0031918514e07ea0a0ef484791c305cb0690ea9666b27c422a442442b63aa768",
+  "created_at": "2026-10-29T09:12:04.924203+00:00"
+}
