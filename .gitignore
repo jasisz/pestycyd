@@ -5,3 +5,8 @@ __pycache__/
 *.pyc
 *.egg-info/
 *.profraw
+
+# Machine-local config (absolute paths); pestycyd.example.toml is the template.
+pestycyd.toml
+# Regenerable: tools/cross.py corpus/crossed/x-d1-acc2-quot.ndjson corpus/real/slice-d1.ndjson corpus/real/slice-s2.ndjson corpus/real/slice-s4.ndjson
+corpus/crossed/x-d1-acc2-quot.ndjson

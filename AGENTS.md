@@ -55,7 +55,7 @@ pool for corpus seeds and known-bad cases.
 - pestka and lean4lean both resolve re-bound intern ids first-binding-wins
   (`intern-table-shadowing`); con-* decline them, nanoda panics.
 - `leanchecker --from-export` is the reference oracle: Pestka has exact
-  parity with it on all 613 `/private/tmp/level-diff-*` probes; lean4lean
+  parity with it on all 613 `corpus/probes/level-diff/` probes; lean4lean
   over-accepts 28 (folds `imax(u+1,1)→u+1` past Lean's def-eq).
 - Serialized-field authority split (probed): official *re-derives* inductive
   metadata — `types[].all`, `numNested`, `numIndices`, `numParams`, `isRec`,
