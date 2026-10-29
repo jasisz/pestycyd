@@ -329,6 +329,78 @@ class HuntTests(unittest.TestCase):
             )[0]
         )
 
+    LENIENT = (("con-a", "con-b"),)
+
+    def test_lenient_group_accept_against_uniform_reject_is_suppressed(self) -> None:
+        mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")
+        results = {
+            "k1": Outcome("reject", 0.1, 1, "reject", "a", ""),
+            "k2": Outcome("reject", 0.1, 1, "reject", "b", ""),
+            "con-a": Outcome("accept", 0.1, 0, "accept", "c", ""),
+            "con-b": Outcome("accept", 0.1, 0, "accept", "d", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results)[0])
+        self.assertFalse(is_interesting(mutation, results, lenient=self.LENIENT)[0])
+
+    def test_lenient_group_decline_against_uniform_accept_is_suppressed(self) -> None:
+        mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")
+        results = {
+            "k1": Outcome("accept", 0.1, 0, "accept", "a", ""),
+            "con-a": Outcome("decline", 0.1, 3, None, "b", ""),
+            "con-b": Outcome("decline", 0.1, 3, None, "c", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results)[0])
+        self.assertFalse(is_interesting(mutation, results, lenient=self.LENIENT)[0])
+
+    def test_lenient_group_does_not_hide_a_second_dissenter(self) -> None:
+        mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")
+        results = {
+            "k1": Outcome("reject", 0.1, 1, "reject", "a", ""),
+            "k2": Outcome("accept", 0.1, 0, "accept", "b", ""),
+            "con-a": Outcome("accept", 0.1, 0, "accept", "c", ""),
+            "con-b": Outcome("accept", 0.1, 0, "accept", "d", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results, lenient=self.LENIENT)[0])
+
+    def test_lenient_group_rejection_still_counts_as_detector(self) -> None:
+        mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")
+        results = {
+            "k1": Outcome("accept", 0.1, 0, "accept", "a", ""),
+            "k2": Outcome("accept", 0.1, 0, "accept", "b", ""),
+            "con-a": Outcome("reject", 0.1, 1, "reject", "c", ""),
+            "con-b": Outcome("reject", 0.1, 1, "reject", "d", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results, lenient=self.LENIENT)[0])
+
+    def test_lenient_group_split_verdict_does_not_suppress(self) -> None:
+        mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")
+        results = {
+            "k1": Outcome("reject", 0.1, 1, "reject", "a", ""),
+            "con-a": Outcome("accept", 0.1, 0, "accept", "b", ""),
+            "con-b": Outcome("reject", 0.1, 1, "reject", "c", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results, lenient=self.LENIENT)[0])
+
+    def test_lenient_suppresses_guaranteed_reject_acceptance(self) -> None:
+        mutation = Mutation("test", "test", "guaranteed-reject", 0, (), "x", 1, "test")
+        results = {
+            "k1": Outcome("reject", 0.1, 1, "reject", "a", ""),
+            "con-a": Outcome("accept", 0.1, 0, "accept", "b", ""),
+            "con-b": Outcome("accept", 0.1, 0, "accept", "c", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results)[0])
+        self.assertFalse(is_interesting(mutation, results, lenient=self.LENIENT)[0])
+
+    def test_lenient_keeps_independent_acceptor_under_guaranteed_reject(self) -> None:
+        mutation = Mutation("test", "test", "guaranteed-reject", 0, (), "x", 1, "test")
+        results = {
+            "k1": Outcome("reject", 0.1, 1, "reject", "a", ""),
+            "k2": Outcome("accept", 0.1, 0, "accept", "b", ""),
+            "con-a": Outcome("accept", 0.1, 0, "accept", "c", ""),
+            "con-b": Outcome("accept", 0.1, 0, "accept", "d", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results, lenient=self.LENIENT)[0])
+
     def test_behavior_feedback_uses_normalized_outcome_fingerprints(self) -> None:
         results = {
             "target": Outcome("reject", 0.1, 1, "reject", "rejected: first class", ""),

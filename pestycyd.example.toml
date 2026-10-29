@@ -11,6 +11,14 @@ version = 1
 timeout = 20.0
 state = ".pestycyd"
 
+# Optional hunt tuning. lenient-groups names checker sets whose unanimous
+# accept or decline — against an otherwise uniform verdict — is treated as
+# expected divergence rather than a finding (derived fields, missing
+# features). Their lone *rejection* still counts, since it may expose a bug
+# the majority misses. List each group as its own kernel-name array.
+[hunt]
+lenient-groups = [["con-leche", "con-ron"]]
+
 # Pestka: native cores, Aver VM, WebAssembly GC, and LLVM coverage.
 [kernels.pestka-old]
 command = ["../.build/target/release/main", "{file}", "1", "old"]

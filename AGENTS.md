@@ -19,8 +19,14 @@ committed template):
   nanoda goes through `adapters/nanoda/run` (JSON config + stdin).
 - `con-*` exit codes: 0 accept, 1 reject, 3 malformed input → mapped to
   `decline` in config (they never reached semantic checking).
-- `pestka-vm` is disabled: installed aver 0.24.1 cannot parse pestka's
-  sources (pinned aver is newer). Re-enable after upgrading aver.
+- `pestka-vm` runs via pinned aver `/private/tmp/aver-pinned/target/release/aver`
+  (0.31.0-dev; installed 0.24.1 can't parse pestka's sources). It interprets
+  `../pestka/main.av` — a genuinely independent implementation, but slow
+  (~seconds per input): keep it out of broad hunts, use it on matrices of
+  already-interesting candidates. `pestka/aver.toml` needed its obsolete
+  `[rust].panic` key removed for aver 0.31.
+- `pestka-llvm` is the coverage-instrumented pestka build
+  (`../pestka/.build-pestycyd/`) feeding `pestycyd-llvm-feedback`.
 - Older toolchains (4.32.0, 4.34.1) under `~/.elan/toolchains/` provide
   older copies of the same checkers for version-differential runs.
 
@@ -37,9 +43,10 @@ pool for corpus seeds and known-bad cases.
 - nanoda panics on any export whose expression table contains
   structurally-equal records (`Attempted to insert duplicate Expr`,
   parser.rs:120) — even valid, validity-preserving outputs (eta/let wraps
-  re-emit `bvar:0`). Also `tc.rs def_eq` assertion panics. Robustness class;
-  use `--semantic-only` on differential campaigns to cut the noise, keep
-  robustness on for guaranteed-accept campaigns.
+  re-emit `bvar:0`). Also `tc.rs def_eq` assertion panics. Robustness class.
+  `tolerate = ["crash"]` on `[kernels.nanoda]` suppresses it in hunts
+  (per-kernel tolerated severe statuses, `KernelSpec.tolerate`); its
+  accept/reject verdicts still count for differentials.
 - con-leche/con-ron **derive recursor rules and ignore serialized
   `rules[].rhs`** entirely (probe: `rhs` pointing at `Sort` still accepts).
   Any mutation confined to serialized rec-rule payload fields yields

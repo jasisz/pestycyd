@@ -38,6 +38,7 @@ def is_interesting(
     results: dict[str, Outcome],
     include_robustness: bool = True,
     tolerated: dict[str, frozenset[str]] | None = None,
+    lenient: tuple[tuple[str, ...], ...] = (),
 ) -> tuple[bool, str]:
     ignored = tolerated or {}
 
@@ -47,10 +48,32 @@ def is_interesting(
             and status not in ignored.get(name, ())
         )
 
+    # A lenient group suppresses a deviation when its members unanimously
+    # accept or decline while every other kernel shares one verdict.  This
+    # models checkers that derive fields or lack features by design; their
+    # lone rejection still counts because it may expose bugs the rest miss.
+    semantic = {
+        name: outcome.status
+        for name, outcome in results.items()
+        if outcome.status in {"accept", "reject", "decline"}
+    }
+
+    def lenient_only() -> bool:
+        for group in lenient or ():
+            inside = {semantic[name] for name in group if name in semantic}
+            rest = {status for name, status in semantic.items() if name not in group}
+            if (
+                len(inside) == 1
+                and next(iter(inside)) in {"accept", "decline"}
+                and len(rest) == 1
+            ):
+                return True
+        return False
+
     values = [outcome.status for outcome in results.values()]
     if mutation.oracle == "guaranteed-reject":
         accepted = [name for name, outcome in results.items() if outcome.status == "accept"]
-        if accepted:
+        if accepted and not lenient_only():
             return True, "accepted guaranteed-invalid input"
         robustness = include_robustness and any(
             severe(name, outcome.status) for name, outcome in results.items()
@@ -64,9 +87,8 @@ def is_interesting(
             and (include_robustness or outcome.status in {"reject", "decline"})
             and outcome.status not in ignored.get(name, ())
         ]
-        return bool(failures), "failed validity-preserving input"
-    semantic = [value for value in values if value in {"accept", "reject", "decline"}]
-    different = len(set(semantic)) > 1
+        return bool(failures) and not lenient_only(), "failed validity-preserving input"
+    different = len(set(semantic.values())) > 1 and not lenient_only()
     robustness = include_robustness and any(
         severe(name, outcome.status) for name, outcome in results.items()
     )
@@ -403,6 +425,7 @@ def run_hunt(
                 results,
                 include_robustness=not params.semantic_only,
                 tolerated=tolerated_statuses,
+                lenient=config.hunt_lenient,
             )
             if finding_expect:
                 candidate_matches = matches_expectations(finding_expect, results)

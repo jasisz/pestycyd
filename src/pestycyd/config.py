@@ -82,6 +82,7 @@ class Config:
     path: Path
     state: Path
     kernels: tuple[KernelSpec, ...]
+    hunt_lenient: tuple[tuple[str, ...], ...] = ()
 
     def selected(self, names: list[str] | None) -> tuple[KernelSpec, ...]:
         if not names:
@@ -219,7 +220,23 @@ def load_config(path: Path) -> Config:
                 tolerate=tuple(tolerate_value),
             )
         )
-    return Config(path=path, state=state, kernels=tuple(kernels))
+    hunt_value = raw.get("hunt", {})
+    if not isinstance(hunt_value, dict):
+        raise ValueError("[hunt] must be a table")
+    lenient_value = hunt_value.get("lenient-groups", [])
+    if not isinstance(lenient_value, list) or not all(
+        isinstance(group, list)
+        and group
+        and all(isinstance(name, str) for name in group)
+        for group in lenient_value
+    ):
+        raise ValueError("hunt.lenient-groups must be an array of kernel-name arrays")
+    return Config(
+        path=path,
+        state=state,
+        kernels=tuple(kernels),
+        hunt_lenient=tuple(tuple(group) for group in lenient_value),
+    )
 
 
 def executable_fingerprint(spec: KernelSpec) -> dict[str, object] | None:
