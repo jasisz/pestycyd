@@ -17,3 +17,4 @@ matrix disagreement cannot be mistaken for a proof that one checker is wrong.
 When one of these is escalated to a closed false proof, move the minimized
 case to `regressions/` and add the exact upstream issue rather than merely a
 related-family link.
+| `pestka-imax-literal.ndjson` | `imax(succ u, 1)` nested inside a `forallE` codomain; every other kernel folds it to `succ u` and accepts, Pestka rejects `declaration type mismatch`. One of ~30 level-probe vectors where Pestka alone rejects, so its `imax`/`max` normalization has a completeness gap on literal second arguments. | Pestka-side completeness bug candidate; probed during the `level-diff` investigation, still reproduces on the current build. |
