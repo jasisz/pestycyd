@@ -139,6 +139,19 @@ class TransformTests(unittest.TestCase):
             self.assertEqual(rec["rules"], [{"ctor": ctor["name"], "nfields": 1, "rhs": rec["rules"][0]["rhs"]}])
             self.assertEqual(block["types"][0]["isRec"], fault == "non-positive")
 
+    def test_extra_recursor_copies_the_first_recursor_under_a_new_name(self) -> None:
+        from pathlib import Path
+
+        seed = Document.load(Path(__file__).resolve().parents[1] / "corpus/good/boolprop-valid.ndjson")
+        (mutation,) = [m for m in CAMPAIGNS["single-fault"].generate(seed) if m.label == "extra-recursor"]
+        changed = seed.mutated(mutation)
+        self.assert_well_formed(changed)
+        block = next(line["inductive"] for line in changed.lines if "inductive" in line)
+        first, copy = block["recs"]
+        self.assertEqual({k: v for k, v in first.items() if k != "name"}, {k: v for k, v in copy.items() if k != "name"})
+        names = {line["in"]: line["str"] for line in changed.lines if "in" in line and "str" in line}
+        self.assertEqual(names[copy["name"]], {"pre": first["name"], "str": "pestycydCopy"})
+
     def test_wrap_eta_builds_expanded_lambda(self) -> None:
         document = Document(
             (

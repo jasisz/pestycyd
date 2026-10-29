@@ -877,6 +877,32 @@ def append_undeclared_universe(document: Document) -> Document:
     return Document(tuple(lines))
 
 
+def extra_recursor(document: Document, line_no: int) -> Document:
+    """Serialize a copy of a block's first recursor under a name of its own.
+
+    The copy is a faithful recursor of the block, so its type and rules
+    check; the only fault is a recursor the block does not generate, which
+    a checker that installs serialized recursors without matching their
+    names would add to the environment (nanoda PR #65).
+    """
+    from .rewrite import renumber
+
+    lines = [copy.deepcopy(line) for line in document.lines]
+    block = lines[line_no].get("inductive")
+    if not isinstance(block, dict) or not block.get("recs"):
+        raise ValueError("extra-recursor needs an inductive block with a recursor")
+    original = block["recs"][0]
+    fresh = 1 + max([0, *(line["in"] for line in lines if isinstance(line.get("in"), int))])
+    copy_rec = copy.deepcopy(original)
+    copy_rec["name"] = fresh
+    block["recs"].append(copy_rec)
+    lines.insert(line_no, {"in": fresh, "str": {"pre": original["name"], "str": "pestycydCopy"}})
+    renumbered = renumber(Document(tuple(lines)))
+    if renumbered is None:
+        raise ValueError("document has dangling or re-bound table references")
+    return renumbered
+
+
 # Field types for append_field_inductive: the one rule each breaks.
 FIELD_FAULTS = ("non-positive", "field-too-large", "control")
 
@@ -951,6 +977,8 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return let_ill_typed(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "theorem-of-type":
         return theorem_of_type(Document(tuple(lines)), rewrite.line)
+    if kind == "extra-recursor":
+        return extra_recursor(Document(tuple(lines)), rewrite.line)
     if kind == "append-field-inductive":
         return append_field_inductive(Document(tuple(lines)), str(rewrite.params[0]))
     if kind == "append-undeclared-universe":
