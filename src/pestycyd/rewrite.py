@@ -62,11 +62,12 @@ def expression_reference_sites(line: dict[str, object]) -> Iterator[tuple[tuple[
     mdata = line.get("mdata")
     if isinstance(mdata, dict):
         yield ("mdata",), "expr"
-    for kind in DECLARATION_KINDS:
+    for kind in (*DECLARATION_KINDS, "quot"):
         declaration = line.get(kind)
         if isinstance(declaration, dict):
             for field in ("type", "value"):
-                yield (kind,), field
+                if kind != "quot" or field in declaration:
+                    yield (kind,), field
     block = line.get("inductive")
     if isinstance(block, dict):
         for group in INDUCTIVE_GROUPS:
@@ -96,7 +97,7 @@ def name_reference_sites(line: dict[str, object]) -> Iterator[tuple[tuple[object
         obj = line.get(binder)
         if isinstance(obj, dict):
             yield (binder,), "name"
-    for kind in DECLARATION_KINDS:
+    for kind in (*DECLARATION_KINDS, "quot"):
         declaration = line.get(kind)
         if isinstance(declaration, dict):
             for field in ("name", "levelParams", "all"):

@@ -161,6 +161,30 @@ class CanonicalizeTests(unittest.TestCase):
         self.assertIn("mk", canonical.render())
 
 
+class QuotRenumberTests(unittest.TestCase):
+    def test_quot_records_follow_renumbered_names_and_expressions(self) -> None:
+        # Name 3 is interned before name 2, as in an export whose quot
+        # records were reordered: dense renumbering swaps them.
+        document = Document(
+            (
+                {"meta": {"format": {"version": "3.1.0"}}},
+                {"in": 1, "str": {"pre": 0, "str": "u"}},
+                {"il": 1, "param": 1},
+                {"in": 3, "str": {"pre": 0, "str": "Quot"}},
+                {"ie": 5, "sort": 1},
+                {"quot": {"kind": "type", "levelParams": [1], "name": 3, "type": 5}},
+                {"in": 2, "str": {"pre": 3, "str": "mk"}},
+            )
+        )
+        renumbered = renumber(document)
+        assert renumbered is not None
+        names = {line["in"]: line["str"]["str"] for line in renumbered.lines if "in" in line}
+        quot = next(line["quot"] for line in renumbered.lines if "quot" in line)
+        self.assertEqual(names[quot["name"]], "Quot")
+        expressions = {line["ie"]: line for line in renumbered.lines if "ie" in line}
+        self.assertIn(quot["type"], expressions)
+
+
 class CanonicalFalseTheoremTests(unittest.TestCase):
     def make(self, *lines: dict[str, object]) -> Document:
         return Document((META, *lines))

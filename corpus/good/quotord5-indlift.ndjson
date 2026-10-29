@@ -102,7 +102,7 @@
 {"ie":70,"forallE":{"binderInfo":"implicit","body":69,"name":14,"type":59}}
 {"ie":71,"forallE":{"binderInfo":"implicit","body":70,"name":20,"type":12}}
 {"ie":72,"forallE":{"binderInfo":"implicit","body":71,"name":2,"type":0}}
-{"quot":{"kind":"ind","levelParams":[1],"name":25,"type":86}}
+{"quot":{"kind":"ind","levelParams":[1],"name":24,"type":72}}
 {"in":25,"str":{"pre":22,"str":"lift"}}
 {"ie":73,"forallE":{"binderInfo":"default","body":3,"name":3,"type":5}}
 {"ie":74,"app":{"fn":48,"arg":17}}
@@ -118,4 +118,4 @@
 {"ie":84,"forallE":{"binderInfo":"implicit","body":83,"name":14,"type":16}}
 {"ie":85,"forallE":{"binderInfo":"implicit","body":84,"name":20,"type":12}}
 {"ie":86,"forallE":{"binderInfo":"implicit","body":85,"name":2,"type":0}}
-{"quot":{"kind":"lift","levelParams":[1,13],"name":24,"type":70}}
+{"quot":{"kind":"lift","levelParams":[1,13],"name":25,"type":86}}
