@@ -291,6 +291,44 @@ class HuntTests(unittest.TestCase):
         }
         self.assertTrue(is_interesting(mutation, results, include_robustness=False)[0])
 
+    def test_tolerated_crash_does_not_raise_robustness_finding(self) -> None:
+        mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")
+        results = {
+            "reference": Outcome("reject", 0.1, 1, "reject", "a", ""),
+            "target": Outcome("crash", 0.1, 101, None, "panic", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results)[0])
+        self.assertFalse(
+            is_interesting(
+                mutation, results, tolerated={"target": frozenset({"crash"})}
+            )[0]
+        )
+
+    def test_tolerated_crash_keeps_semantic_verdicts_load_bearing(self) -> None:
+        mutation = Mutation("test", "test", "differential", 0, (), "x", 1, "test")
+        results = {
+            "reference": Outcome("reject", 0.1, 1, "reject", "a", ""),
+            "target": Outcome("accept", 0.1, 0, "accept", "b", ""),
+        }
+        self.assertTrue(
+            is_interesting(
+                mutation, results, tolerated={"target": frozenset({"crash"})}
+            )[0]
+        )
+
+    def test_tolerated_crash_does_not_fail_guaranteed_accept(self) -> None:
+        mutation = Mutation("test", "test", "guaranteed-accept", 0, (), "x", 1, "test")
+        results = {
+            "reference": Outcome("accept", 0.1, 0, "accept", "a", ""),
+            "target": Outcome("crash", 0.1, 101, None, "panic", ""),
+        }
+        self.assertTrue(is_interesting(mutation, results)[0])
+        self.assertFalse(
+            is_interesting(
+                mutation, results, tolerated={"target": frozenset({"crash"})}
+            )[0]
+        )
+
     def test_behavior_feedback_uses_normalized_outcome_fingerprints(self) -> None:
         results = {
             "target": Outcome("reject", 0.1, 1, "reject", "rejected: first class", ""),

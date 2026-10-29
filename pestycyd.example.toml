@@ -55,10 +55,14 @@ verdict = "none"
 enabled = false
 
 # The Nanoda family. Older CLIs take config JSON and the export on stdin.
+# tolerate lists severe statuses that should not raise a robustness finding:
+# nanoda panics on malformed tables so often that crash=interesting drowns
+# the report, while its accept/reject verdicts stay fully load-bearing.
 [kernels.nanoda]
 command = ["adapters/nanoda/run", "kernels/nanoda/nanoda_bin", "{file}"]
 env = { NANODA_RAW_STATUS = "1" }
 verdict = "none"
+tolerate = ["crash"]
 enabled = false
 
 [kernels.nanoda-arena]

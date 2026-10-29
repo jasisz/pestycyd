@@ -15,6 +15,7 @@ from .outcomes import Status
 VERDICT_MODES = {"required", "optional", "none"}
 FEEDBACK_FORMATS = {"lines", "bitmap", "bitmap-chunks"}
 EXIT_STATUSES = {"accept", "reject", "decline", "crash", "error"}
+SEVERE_STATUSES = {"timeout", "crash", "error", "runner-error"}
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ class KernelSpec:
     env: tuple[tuple[str, str], ...] = ()
     probe: tuple[str, ...] | None = None
     feedback: FeedbackSpec | None = None
+    tolerate: tuple[Status, ...] = ()
 
     def expand(self, value: str, path: Path, run_dir: Path) -> str:
         return value.replace("{file}", str(path)).replace("{run_dir}", str(run_dir))
@@ -70,6 +72,7 @@ class KernelSpec:
             "env": dict(self.env),
             "probe": None if self.probe is None else list(self.probe),
             "feedback": None if self.feedback is None else self.feedback.public(),
+            "tolerate": list(self.tolerate),
             "executable": executable_fingerprint(self),
         }
 
@@ -191,6 +194,16 @@ def load_config(path: Path) -> Config:
                 raise ValueError(f"kernels.{name}.exit_codes maps exit {code} more than once")
             seen_codes.add(code)
             parsed_exit_codes.append((code, status))  # type: ignore[arg-type]
+        tolerate_value = table.get("tolerate", [])
+        if (
+            not isinstance(tolerate_value, list)
+            or not tolerate_value == list(dict.fromkeys(tolerate_value))
+            or not all(status in SEVERE_STATUSES for status in tolerate_value)
+        ):
+            raise ValueError(
+                f"kernels.{name}.tolerate lists distinct severe statuses "
+                f"(timeout, crash, error, runner-error)"
+            )
         kernels.append(
             KernelSpec(
                 name=name,
@@ -203,6 +216,7 @@ def load_config(path: Path) -> Config:
                 env=tuple(sorted(env_value.items())),
                 probe=probe,
                 feedback=feedback,
+                tolerate=tuple(tolerate_value),
             )
         )
     return Config(path=path, state=state, kernels=tuple(kernels))

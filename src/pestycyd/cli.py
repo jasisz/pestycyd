@@ -37,25 +37,39 @@ def is_interesting(
     mutation: Mutation,
     results: dict[str, Outcome],
     include_robustness: bool = True,
+    tolerated: dict[str, frozenset[str]] | None = None,
 ) -> tuple[bool, str]:
+    ignored = tolerated or {}
+
+    def severe(name: str, status: str) -> bool:
+        return (
+            status in {"crash", "timeout", "error", "runner-error"}
+            and status not in ignored.get(name, ())
+        )
+
     values = [outcome.status for outcome in results.values()]
-    severe = any(value in {"crash", "timeout", "error", "runner-error"} for value in values)
     if mutation.oracle == "guaranteed-reject":
         accepted = [name for name, outcome in results.items() if outcome.status == "accept"]
         if accepted:
             return True, "accepted guaranteed-invalid input"
-        return severe and include_robustness, "kernel robustness failure"
+        robustness = include_robustness and any(
+            severe(name, outcome.status) for name, outcome in results.items()
+        )
+        return robustness, "kernel robustness failure"
     if mutation.oracle == "guaranteed-accept":
         failures = [
             name
             for name, outcome in results.items()
             if outcome.status != "accept"
             and (include_robustness or outcome.status in {"reject", "decline"})
+            and outcome.status not in ignored.get(name, ())
         ]
         return bool(failures), "failed validity-preserving input"
     semantic = [value for value in values if value in {"accept", "reject", "decline"}]
     different = len(set(semantic)) > 1
-    robustness = severe and include_robustness
+    robustness = include_robustness and any(
+        severe(name, outcome.status) for name, outcome in results.items()
+    )
     return robustness or different, "kernel robustness failure" if robustness else "differential outcome"
 
 
@@ -332,6 +346,9 @@ def run_hunt(
             0, time.perf_counter() - started, [], 0, len(seen_feedback), False, no_seeds=True
         )
     queue = deque(frontier)
+    tolerated_statuses = {
+        kernel.name: frozenset(kernel.tolerate) for kernel in kernels if kernel.tolerate
+    }
     hits: list[FindingHit] = []
     findings = 0
     novel = 0
@@ -382,7 +399,10 @@ def run_hunt(
             candidate.write_text(content)
             results = run_matrix(kernels, candidate, params.workers)
             interesting, reason = is_interesting(
-                mutation, results, include_robustness=not params.semantic_only
+                mutation,
+                results,
+                include_robustness=not params.semantic_only,
+                tolerated=tolerated_statuses,
             )
             if finding_expect:
                 candidate_matches = matches_expectations(finding_expect, results)
