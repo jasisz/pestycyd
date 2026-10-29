@@ -54,5 +54,14 @@ pool for corpus seeds and known-bad cases.
   not a bug (same family as the withdrawn prop-recursor report).
 - pestka and lean4lean both resolve re-bound intern ids first-binding-wins
   (`intern-table-shadowing`); con-* decline them, nanoda panics.
+- `leanchecker --from-export` is the reference oracle: Pestka has exact
+  parity with it on all 613 `/private/tmp/level-diff-*` probes; lean4lean
+  over-accepts 28 (folds `imax(u+1,1)→u+1` past Lean's def-eq).
+- Serialized-field authority split (probed): official *re-derives* inductive
+  metadata — `types[].all`, `numNested`, `numIndices`, `numParams`, `isRec`,
+  `isReflexive` mutations are all accepted even when wrong — but *validates*
+  `recs[].all` order. Pestka validates all of them (stricter than reference,
+  ~74 officially-valid rejections); lean4lean/con-* derive all of them;
+  nanoda derives `all`-as-set and misses the `recs[].all` order check.
 - `findings` prints a `campaign × status-vector` signature rollup — use it
   to triage large stores before reading individual cases.
