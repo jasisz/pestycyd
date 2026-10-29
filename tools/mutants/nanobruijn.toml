@@ -83,11 +83,9 @@ description = "a theorem's type need not be a proposition"
 old = "if !self.ctx.is_zero(sort) {"
 new = "if false && !self.ctx.is_zero(sort) {"
 
-[mutant.open-declaration-type]
-file = "src/tc.rs"
-description = "a declaration type may contain loose bound variables"
-old = "assert!(self.ctx.num_loose_bvars(info.ty) == 0);"
-new = "let _ = info.ty;"
+# No open-declaration-type mutant: without the closedness assertion the
+# loose variable still reaches inference, where local_type panics on the
+# same input (`dbj_idx >= depth`); no export tells the two builds apart.
 
 [mutant.undeclared-universe]
 file = "src/tc.rs"
