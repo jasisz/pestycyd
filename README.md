@@ -30,7 +30,10 @@ error, not a rejection.
 ```bash
 uv sync --locked
 uv run pestycyd --config pestycyd.toml doctor
-uv run pestycyd --config pestycyd.toml matrix corpus/good
+uv run pestycyd --config pestycyd.toml matrix corpus/good --report before.json
+# after rebuilding a checker: which verdicts moved?
+uv run pestycyd --config pestycyd.toml matrix corpus/good --baseline before.json
+uv run pestycyd renumber hand-edited.ndjson dense.ndjson
 uv run pestycyd --config pestycyd.toml campaigns
 uv run pestycyd --config pestycyd.toml hunt corpus/good \
   --campaign closedness --campaign metadata-boundaries \

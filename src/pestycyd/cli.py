@@ -20,7 +20,7 @@ from .generators import app_spine, con_k_params, deep_binder
 from .minimize import ddmin, well_formed_export
 from .ndjson import Document, Mutation, files
 from .outcomes import Outcome
-from .rewrite import canonical_false_theorem, canonicalize
+from .rewrite import canonical_false_theorem, canonicalize, renumber
 from .runner import run_matrix, run_probe
 from .store import FindingStore, atomic_text
 
@@ -174,10 +174,36 @@ def generate_app_spine(
     return 0
 
 
+def renumber_command(
+    _config: Config | None, _kernels: tuple[KernelSpec, ...], args: argparse.Namespace
+) -> int:
+    document = Document.load(args.input)
+    renumbered = renumber(document)
+    if renumbered is None:
+        print(f"pestycyd: {args.input} has dangling or re-bound table references", file=sys.stderr)
+        return 2
+    atomic_text(args.output, renumbered.render())
+    print(f"renumbered {len(document.lines)} records: {args.output}")
+    return 0
+
+
+def baseline_statuses(path: Path) -> dict[Path, dict[str, str]]:
+    """Map each file in a saved matrix report to its kernel -> status vector."""
+    report = json.loads(path.read_text())
+    if report.get("schema") != "pestycyd-matrix-1":
+        raise ValueError(f"{path} is not a pestycyd matrix report")
+    return {
+        Path(run["file"]).resolve(): {name: result["status"] for name, result in run["results"].items()}
+        for run in report["runs"]
+    }
+
+
 def matrix_command(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
     paths = files(args.paths)
+    baseline = baseline_statuses(args.baseline) if args.baseline else None
     rows: list[dict[str, object]] = []
     differences = 0
+    changes = 0
     for path in paths:
         results = run_matrix(kernels, path, args.workers)
         row = {"file": str(path), "results": matrix_json(results)}
@@ -190,11 +216,29 @@ def matrix_command(config: Config, kernels: tuple[KernelSpec, ...], args: argpar
             print(f"DIFFER {path}: {statuses(results)}")
         elif args.verbose:
             print(f"{path}: {statuses(results)}")
+        if baseline is not None:
+            # Only kernels present in both runs are compared: adding or
+            # disabling a kernel is a configuration change, not drift.
+            before = baseline.get(path.resolve())
+            if before is None:
+                print(f"NEW {path}")
+                continue
+            moved = [
+                f"{name} {before[name]}->{result.status}"
+                for name, result in results.items()
+                if name in before and before[name] != result.status
+            ]
+            if moved:
+                changes += 1
+                print(f"CHANGED {path}: {', '.join(moved)}")
     report = {"schema": "pestycyd-matrix-1", "kernels": [k.public() for k in kernels], "runs": rows}
     if args.report:
         atomic_text(args.report, json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-    print(f"matrix: {len(paths)} inputs, {len(kernels)} kernels, {differences} interesting")
-    return 1 if differences else 0
+    summary = f"matrix: {len(paths)} inputs, {len(kernels)} kernels, {differences} interesting"
+    if baseline is not None:
+        summary += f", {changes} changed since baseline"
+    print(summary)
+    return 1 if differences or changes else 0
 
 
 @dataclasses.dataclass
@@ -828,8 +872,20 @@ def parser() -> argparse.ArgumentParser:
     command = sub.add_parser("matrix", help="run inputs through a kernel matrix")
     command.add_argument("paths", nargs="+")
     command.add_argument("--report", type=Path)
+    command.add_argument(
+        "--baseline",
+        type=Path,
+        help="earlier --report; print verdicts that changed since it was written",
+    )
     command.add_argument("--verbose", action="store_true")
     command.set_defaults(function=matrix_command)
+
+    command = sub.add_parser(
+        "renumber", help="renumber name, level and expression tables densely"
+    )
+    command.add_argument("input", type=Path)
+    command.add_argument("output", type=Path)
+    command.set_defaults(function=renumber_command, no_config=True)
 
     command = sub.add_parser("hunt", help="run structure-aware mutation campaigns")
     command.add_argument("paths", nargs="+")
