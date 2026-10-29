@@ -730,6 +730,22 @@ def findings_command(config: Config, _kernels: tuple[KernelSpec, ...], args: arg
             f"  {len(entries):4d} × {key[-12:]}{suffix} "
             f"{statuses} campaign={campaign}"
         )
+    signatures: dict[tuple[object, tuple[tuple[str, object], ...]], int] = {}
+    for row in report["clusters"]:
+        signature = (row["campaign"], tuple(sorted(row["statuses"].items())))
+        signatures[signature] = signatures.get(signature, 0) + int(row["findings"])
+    sig_rows = sorted(signatures.items(), key=lambda item: -item[1])
+    if sig_rows:
+        print("signatures (campaign × status vector):")
+        for (campaign, vector), count in sig_rows[:20]:
+            rendered = ", ".join(f"{name}={status}" for name, status in vector)
+            print(f"  {count:5d} × {campaign}: {rendered}")
+        if len(sig_rows) > 20:
+            print(f"  … {len(sig_rows) - 20} more signature(s)")
+    report["signatures"] = [
+        {"campaign": campaign, "statuses": dict(vector), "findings": count}
+        for (campaign, vector), count in sig_rows
+    ]
     if args.report:
         atomic_text(args.report, json.dumps(report, indent=2, ensure_ascii=False) + "\n")
         print(f"findings report: {args.report}")
