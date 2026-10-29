@@ -16,6 +16,8 @@ primitive reductions, inductives, and imported recursors whenever possible.
 | `nat-ops-small.ndjson` | `Nat` primitive operations across ~200 definitions; trusted-reduction surface for `Nat.add`/`Nat.div` and friends. |
 | `deep-129-outer.ndjson` | Deep binder chain (129 nested `Pi`/`lam`); stresses loose-bvar range tracking and binder-depth bookkeeping. |
 | `boolprop-valid.ndjson` | Small `Bool`/`Prop` inductive with recursor use; the clean control for Bool/Prop recursor mutations. |
+| `field-inductive-control.ndjson` | `swapbox` plus `inductive PestycydOk : Type | mk : Prop → PestycydOk` with its exact recursor; the valid control of `single-fault`'s non-positive and field-too-large variants (`append_field_inductive`). |
+| `large-elim-unit-use.ndjson` | `swapbox` plus a `True`-like proposition with a large recursor (`k = true`) and `use : P → Type` built from it; the valid control of the large-elimination variants (`append_large_elimination`). |
 | `cyclic-rec.ndjson` | Recursor rule whose RHS recursively references the recursor itself; seed for cyclic-rule campaigns. |
 | `indexed-prop.ndjson` | Indexed `Prop` family with four inductive blocks; exercises index-threaded recursor rules. |
 | `minimal-proof-irrelevance.ndjson` | Minimal proof-irrelevance transport across non-standard axioms; con-* decline it by design (`not implemented yet: non-standard axiom`). |

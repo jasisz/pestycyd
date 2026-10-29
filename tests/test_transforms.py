@@ -103,7 +103,10 @@ class TransformTests(unittest.TestCase):
         mutations = {m.label: m for m in CAMPAIGNS["single-fault"].generate(document)}
         self.assertEqual(
             set(mutations),
-            {"let-ill-typed-def", "theorem-of-type", "undeclared-universe", "non-positive", "field-too-large"},
+            {
+                "let-ill-typed-def", "theorem-of-type", "undeclared-universe", "non-positive",
+                "field-too-large", "large-elimination-two-ctors", "large-elimination-data-field",
+            },
         )
         self.assertTrue(all(m.oracle == "guaranteed-reject" for m in mutations.values()))
         for mutation in mutations.values():

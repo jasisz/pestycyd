@@ -956,6 +956,92 @@ def append_field_inductive(document: Document, fault: str) -> Document:
     return Document(tuple(lines))
 
 
+# Propositions serialized with a large eliminator, and what each breaks.
+LARGE_ELIMINATION = ("two-ctors", "data-field", "control")
+
+
+def append_large_elimination(document: Document, variant: str) -> Document:
+    """Append a proposition ``P`` with a large recursor, then use it at ``Type``.
+
+    A proposition eliminates into every universe only with at most one
+    constructor whose fields are proofs.  ``two-ctors`` (like ``Or``) and
+    ``data-field`` (``mk : Prop → P``) break that; ``control`` (like
+    ``True``) is valid.  The serialized ``P.rec`` is the large one, and
+    ``def use : P → Type := fun t => P.rec (fun _ => Type) ... t`` needs it,
+    so a checker that derives the small eliminator still rejects ``use``:
+    accepting both means a forged eliminator was installed, and with two
+    constructors proof irrelevance then proves ``False``.
+    """
+    if variant not in LARGE_ELIMINATION:
+        raise ValueError(f"unknown large-elimination variant: {variant}")
+    lines = [copy.deepcopy(line) for line in document.lines]
+    out = _Appender(lines)
+    stem = {"two-ctors": "Either", "data-field": "Holds", "control": "Unit"}[variant]
+    p_name = out.name(f"Pestycyd{stem}")
+    ctor_names = [out.add("in", str={"pre": p_name, "str": text})
+                  for text in (("a", "b") if variant == "two-ctors" else ("mk",))]
+    rec_name = out.add("in", str={"pre": p_name, "str": "rec"})
+    use_name = out.add("in", str={"pre": p_name, "str": "use"})
+    u_name, motive_name, t_name, x_name = (out.name(text) for text in ("u", "motive", "t", "x"))
+    one = out.add("il", succ=0)
+    two = out.add("il", succ=one)
+    u = out.add("il", param=u_name)
+    prop, type_, sort_u = out.add("ie", sort=0), out.add("ie", sort=one), out.add("ie", sort=u)
+    bvars: dict[int, int] = {}
+
+    def bvar(index: int) -> int:
+        if index not in bvars:
+            bvars[index] = out.add("ie", bvar=index)
+        return bvars[index]
+
+    p = out.add("ie", const={"name": p_name, "us": []})
+    ctors = [out.add("ie", const={"name": name, "us": []}) for name in ctor_names]
+    field = prop if variant == "data-field" else None
+    count = len(ctors)
+    motive_type = out.pi(t_name, p, sort_u)
+    minors = []
+    for index, ctor in enumerate(ctors):
+        # Inside minor ``index`` the motive is bound ``index`` binders out.
+        if field is None:
+            minors.append(out.app(bvar(index), ctor))
+        else:
+            minors.append(out.pi(x_name, field, out.app(bvar(index + 1), out.app(ctor, bvar(0)))))
+    body = out.pi(t_name, p, out.app(bvar(count + 1), bvar(0)))
+    for index in reversed(range(count)):
+        body = out.pi(ctor_names[index], minors[index], body)
+    rec_type = out.pi(motive_name, motive_type, body, implicit=True)
+    rules = []
+    for index, ctor_name in enumerate(ctor_names):
+        if field is None:
+            rhs = bvar(count - 1 - index)
+        else:
+            rhs = out.lam(x_name, field, out.app(bvar(count - index), bvar(0)))
+        for binder in reversed(range(count)):
+            rhs = out.lam(ctor_names[binder], minors[binder], rhs)
+        rhs = out.lam(motive_name, motive_type, rhs)
+        rules.append({"ctor": ctor_name, "nfields": 0 if field is None else 1, "rhs": rhs})
+    lines.append({"inductive": {
+        "types": [{"all": [p_name], "ctors": ctor_names, "isRec": False, "isReflexive": False, "isUnsafe": False,
+                   "levelParams": [], "name": p_name, "numIndices": 0, "numNested": 0, "numParams": 0,
+                   "type": prop}],
+        "ctors": [{"cidx": index, "induct": p_name, "isUnsafe": False, "levelParams": [], "name": name,
+                   "numFields": 0 if field is None else 1, "numParams": 0,
+                   "type": p if field is None else out.pi(x_name, field, p)}
+                  for index, name in enumerate(ctor_names)],
+        "recs": [{"all": [p_name], "isUnsafe": False, "k": variant == "control", "levelParams": [u_name],
+                  "name": rec_name, "numIndices": 0, "numMinors": count, "numMotives": 1, "numParams": 0,
+                  "rules": rules, "type": rec_type}],
+    }})
+    # use := fun t : P => @P.rec.{2} (fun _ => Type) m... t, each m returning Prop.
+    term = out.app(out.add("ie", const={"name": rec_name, "us": [two]}), out.lam(t_name, p, type_))
+    for _ in ctors:
+        term = out.app(term, prop if field is None else out.lam(x_name, field, prop))
+    value = out.lam(t_name, p, out.app(term, bvar(0)))
+    lines.append({"def": {"all": [use_name], "hints": "abbrev", "levelParams": [], "name": use_name,
+                          "safety": "safe", "type": out.pi(t_name, p, type_), "value": value}})
+    return Document(tuple(lines))
+
+
 def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
     lines = [copy.deepcopy(line) for line in document.lines]
     if not 0 <= rewrite.line < len(lines):
@@ -977,6 +1063,8 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return let_ill_typed(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "theorem-of-type":
         return theorem_of_type(Document(tuple(lines)), rewrite.line)
+    if kind == "append-large-elimination":
+        return append_large_elimination(Document(tuple(lines)), str(rewrite.params[0]))
     if kind == "extra-recursor":
         return extra_recursor(Document(tuple(lines)), rewrite.line)
     if kind == "append-field-inductive":

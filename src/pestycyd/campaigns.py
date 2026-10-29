@@ -1727,6 +1727,13 @@ def single_fault(document: Document) -> Iterable[Mutation]:
                 "only the block's generated recursors may be installed",
                 rewrite=Rewrite("extra-recursor", line_no),
             )
+    for variant in ("two-ctors", "data-field"):
+        yield Mutation(
+            "single-fault", f"large-elimination-{variant}", "guaranteed-reject",
+            len(lines) - 1, (), "inductive", variant,
+            "propositions eliminate into Type only as syntactic subsingletons",
+            rewrite=Rewrite("append-large-elimination", len(lines) - 1, (), (variant,)),
+        )
     for fault in ("non-positive", "field-too-large"):
         yield Mutation(
             "single-fault", fault, "guaranteed-reject",
@@ -2099,9 +2106,9 @@ CAMPAIGNS: dict[str, Campaign] = {
     ),
     "single-fault": Campaign(
         "single-fault", "guaranteed-reject",
-        "Break exactly one kernel rule (let value, theorem in Prop, bound universes, positivity, field universe, extra recursor).",
+        "Break exactly one kernel rule (let value, theorem in Prop, bound universes, positivity, field universe, extra recursor, large elimination).",
         ("letTypeMismatch", "thmTypeIsNotProp", "undefined universe parameter", "positivity", "field universe bound",
-         "recursor names"),
+         "recursor names", "large elimination"),
         single_fault,
     ),
     "declaration-reordering": Campaign(
