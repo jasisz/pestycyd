@@ -472,3 +472,20 @@ class HuntTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OperatorScheduleTests(unittest.TestCase):
+    def test_rare_operator_gets_a_turn_in_the_first_round(self) -> None:
+        import random
+
+        from pestycyd.cli import operator_balanced
+        from pestycyd.ndjson import Mutation
+
+        def mutation(label: str) -> Mutation:
+            return Mutation("c", label, "differential", 0, (), "f", 0, "t")
+
+        common = [mutation(f"splice-{index}-from-{index + 1}") for index in range(1000)]
+        rare = mutation("proj-type-from-prior")
+        ordered = operator_balanced([*common, rare], random.Random(0))
+        self.assertEqual(len(ordered), 1001)
+        self.assertIn(rare, ordered[:2])

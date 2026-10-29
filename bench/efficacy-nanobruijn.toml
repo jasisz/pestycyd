@@ -1,0 +1,24 @@
+# Mutation score for the seeded nanobruijn defects in tools/mutants.
+#
+# Build the mutants first (binaries land in the state directory):
+#   uv run python tools/mutants/build.py tools/mutants/nanobruijn.toml \
+#     /path/to/nanobruijn .pestycyd/mutants/nanobruijn
+# Then:
+#   uv run pestycyd --config pestycyd.toml efficacy bench/efficacy-nanobruijn.toml \
+#     --report efficacy-report.json
+#
+# `like` names the configured kernel whose command runs the checker; each
+# mutant replaces its `nanobruijn` argument.  A mutant is killed by an input
+# on which it disagrees with `reference` while the pristine build agrees.
+
+version = 1
+reference = "official"
+like = "nanoda"
+manifest = "../.pestycyd/mutants/nanobruijn/mutants.json"
+paths = ["../corpus/good"]
+iterations = 2000
+budget_seconds = 300
+# nanobruijn resolves re-bound intern ids positionally, a known by-design
+# divergence from the reference kernel (corpus/leads/README.md): every
+# intern-table-shadowing input splits pristine from official, never a mutant.
+skip_campaigns = ["intern-table-shadowing"]

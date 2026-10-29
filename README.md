@@ -338,6 +338,29 @@ are cut, not renumbered, which keeps re-bound table identifiers intact.
 the part a report needs. Each line quotes the kernel's reason: the message
 of a Rust panic, otherwise the first line that reads like a refusal.
 
+## Mutation score
+
+The discovery benchmark replays bugs somebody already found. `efficacy`
+measures the search on bugs nobody has looked for: it seeds defects into a
+real checker and counts how many the hunt catches. `tools/mutants/` holds
+the defect specs — each mutant removes or weakens one check by exact text
+replacement — and a builder that compiles every variant plus the unmodified
+`pristine` control:
+
+```bash
+uv run python tools/mutants/build.py tools/mutants/nanobruijn.toml \
+  /path/to/nanobruijn .pestycyd/mutants/nanobruijn
+uv run pestycyd --config pestycyd.toml efficacy bench/efficacy-nanobruijn.toml \
+  --report efficacy.json
+```
+
+A mutant is *killed* by an input on which it disagrees with the reference
+kernel while the pristine build still agrees, so divergences the checker
+already had never count. Each mutant first meets the seeds alone — what the
+corpus already catches — and, if it survives, a budgeted hunt that stops at
+the first kill; the summary separates the two. Mutants with a `history`
+restore a defect that once shipped upstream.
+
 ## Discovery benchmark
 
 `bench/scenarios.toml` pins historical defect families without handing the

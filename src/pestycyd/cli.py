@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from .bench import run_bench
+from .efficacy import run_efficacy
 from .campaigns import CAMPAIGNS, selected as selected_campaigns
 from .config import Config, KernelSpec, load_config
 from .generators import app_spine, con_k_params, deep_binder
@@ -262,6 +263,9 @@ class HuntParams:
     budget_seconds: float | None = None
     workers: int | None = None
     verbose: bool = False
+    schedule: str = "operator"
+    # Ends the hunt at the first finding whose status vector satisfies it.
+    stop_on: Callable[[dict[str, str]], bool] | None = None
 
 
 @dataclasses.dataclass
@@ -288,6 +292,36 @@ class HuntSummary:
     @property
     def novel_findings(self) -> int:
         return sum(1 for finding in self.findings if finding.novel)
+
+
+def operator(mutation: Mutation) -> tuple[str, str]:
+    """The mutation operator: its campaign and label with positions erased."""
+    return mutation.campaign, re.sub(r"\d+", "#", mutation.label)
+
+
+def operator_balanced(mutations: list[Mutation], rng: random.Random) -> list[Mutation]:
+    """Order mutations so every operator gets an equal share of the attempts.
+
+    Operators differ in fan-out by orders of magnitude: splicing proposes
+    hundreds of thousands of candidates where a projection rewrite proposes
+    a handful.  A flat shuffle spends attempts in proportion to fan-out, so
+    a rare operator is effectively never tried; round-robin over shuffled
+    operators gives each one a turn per round.
+    """
+    groups: dict[tuple[str, str], list[Mutation]] = {}
+    for mutation in mutations:
+        groups.setdefault(operator(mutation), []).append(mutation)
+    queues = list(groups.values())
+    for queue in queues:
+        rng.shuffle(queue)
+    ordered: list[Mutation] = []
+    depth = 0
+    while queues:
+        rng.shuffle(queues)
+        ordered.extend(queue[depth] for queue in queues)
+        depth += 1
+        queues = [queue for queue in queues if len(queue) > depth]
+    return ordered
 
 
 def _compose_lineage_oracle(parent_oracle: str, mutation_oracle: str) -> str:
@@ -403,11 +437,15 @@ def run_hunt(
             for mutation in campaign.generate(document)
             if allowed(mutation, protected)
         ]
+        if params.schedule == "operator":
+            mutations = operator_balanced(mutations, rng)
+        else:
+            rng.shuffle(mutations)
+        # The frontier pops buckets from the end.
         bucket = [
             (path, document, mutation, 1, (), protected, seed_matches_finding, "")
-            for mutation in mutations
+            for mutation in reversed(mutations)
         ]
-        rng.shuffle(bucket)
         frontier_buckets.append(bucket)
     while any(frontier_buckets):
         for bucket in frontier_buckets:
@@ -540,6 +578,8 @@ def run_hunt(
                     f"{'FINDING' if created else 'KNOWN'} {digest[:12]} {mutation.label}: "
                     f"{statuses(results)}"
                 )
+                if params.stop_on is not None and params.stop_on(hits[-1].statuses):
+                    break
             if added:
                 coverage_metadata = dict(metadata)
                 coverage_metadata["reason"] = "novel search feedback"
@@ -605,6 +645,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
         finding_expect=dict(getattr(args, "finding_expect", ())),
         finding_require_seed_change=getattr(args, "finding_require_seed_change", False),
         budget_seconds=getattr(args, "budget_seconds", None),
+        schedule=getattr(args, "schedule", "operator"),
         workers=getattr(args, "workers", None),
         verbose=args.verbose,
     )
@@ -844,6 +885,10 @@ def bench_command(config: Config, kernels: tuple[KernelSpec, ...], args: argpars
     return run_bench(config, args)
 
 
+def efficacy_command(config: Config, _kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
+    return run_efficacy(config, args)
+
+
 def findings_command(config: Config, _kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
     """Group stored findings by their canonicalized case.
 
@@ -1076,6 +1121,15 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help="stop mutating after this many seconds of wall time",
     )
+    command.add_argument(
+        "--schedule",
+        choices=("operator", "flat"),
+        default="operator",
+        help=(
+            "operator gives every mutation operator an equal share of attempts; "
+            "flat samples candidates uniformly, favouring high fan-out operators"
+        ),
+    )
     command.add_argument("--verbose", action="store_true")
     command.set_defaults(function=hunt)
 
@@ -1128,6 +1182,16 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--report", type=Path)
     command.add_argument("--state", type=Path)
     command.set_defaults(function=bench_command)
+
+    command = sub.add_parser(
+        "efficacy",
+        help="measure how many seeded-defect checker builds the search catches",
+    )
+    command.add_argument("plan", type=Path)
+    command.add_argument("--filter", action="append", help="run only named mutants; repeatable")
+    command.add_argument("--report", type=Path)
+    command.add_argument("--state", type=Path)
+    command.set_defaults(function=efficacy_command)
 
     command = sub.add_parser(
         "findings",

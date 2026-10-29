@@ -1,0 +1,130 @@
+# Seeded defects for nanobruijn, the configured `nanoda` checker.
+#
+# Each mutant removes or weakens exactly one check, as an exact text
+# replacement in one file; build.py refuses a mutant whose `old` text no
+# longer occurs exactly once, so source drift is loud.  Three mutants
+# restore historical nanoda bugs (`history`); the rest weaken the core
+# typing rules a Lean kernel must enforce.
+#
+# Build:   uv run python tools/mutants/build.py tools/mutants/nanobruijn.toml \
+#            /private/tmp/nanobruijn-arena OUT
+# Measure: uv run pestycyd --config pestycyd.toml efficacy bench/efficacy-nanobruijn.toml
+
+version = 1
+binary = "target/release/nanobruijn"
+build = ["cargo", "build", "--release", "-q"]
+
+[mutant.proj-type-name]
+file = "src/tc.rs"
+description = "projection typeName is not compared with the structure's type"
+history = "nanoda PR #48"
+old = "if inductive_info.name != ty_name {"
+new = "if false && inductive_info.name != ty_name {"
+
+[mutant.recursor-coverage]
+file = "src/inductive.rs"
+description = "the export's recursor names are not compared with the derived ones"
+history = "nanoda PR #65"
+old = "if &derived == from_parser {"
+new = "if true || &derived == from_parser {"
+
+[mutant.nested-rule-field-count]
+file = "src/inductive.rs"
+description = "restored nested recursor rules may change their field count"
+history = "nanoda PR #63"
+old = """
+                    assert_eq!(
+                        old.ctor_telescope_size_wo_params,"""
+new = """
+                    let _ = (
+                        old.ctor_telescope_size_wo_params,"""
+
+[mutant.app-argument-type]
+file = "src/tc.rs"
+description = "an application argument's type is not checked against the binder"
+old = "self.assert_def_eq(binder_type_instd, arg_type);"
+new = "let _ = (binder_type_instd, arg_type);"
+
+[mutant.let-value-type]
+file = "src/tc.rs"
+description = "a let value's type is not checked against its annotation"
+old = "self.assert_def_eq(val_ty, binder_type);"
+new = "let _ = (val_ty, binder_type);"
+
+[mutant.definition-value-type]
+file = "src/tc.rs"
+description = "a definition's value is not checked against its declared type"
+old = """
+                    let inferred_type = tc.infer(ExprPtr::closed(*val), crate::tc::InferFlag::Check);
+                    tc.assert_def_eq(inferred_type, ExprPtr::closed(d.info().ty));
+                });
+                (r.1, dag)"""
+new = """
+                    let inferred_type = tc.infer(ExprPtr::closed(*val), crate::tc::InferFlag::Check);
+                    let _ = inferred_type;
+                });
+                (r.1, dag)"""
+
+[mutant.sort-in-sort]
+file = "src/tc.rs"
+description = "Sort u is typed as Sort u instead of Sort (u+1)"
+old = "let out = self.ctx.succ(l);"
+new = "let out = l;"
+
+[mutant.pi-predicative]
+file = "src/tc.rs"
+description = "Pi types use max instead of imax, losing Prop's impredicativity"
+old = "infd = self.ctx.imax(universe, infd);"
+new = "infd = self.ctx.max(universe, infd);"
+
+[mutant.theorem-not-prop]
+file = "src/tc.rs"
+description = "a theorem's type need not be a proposition"
+old = "if !self.ctx.is_zero(sort) {"
+new = "if false && !self.ctx.is_zero(sort) {"
+
+[mutant.open-declaration-type]
+file = "src/tc.rs"
+description = "a declaration type may contain loose bound variables"
+old = "assert!(self.ctx.num_loose_bvars(info.ty) == 0);"
+new = "let _ = info.ty;"
+
+[mutant.undeclared-universe]
+file = "src/tc.rs"
+description = "a constant may be instantiated with universe parameters the declaration does not bind"
+old = "assert!(self.ctx.all_uparams_defined(c_uparam, this_declar_info.uparams))"
+new = "let _ = (c_uparam, this_declar_info.uparams);"
+
+[mutant.positivity]
+file = "src/inductive.rs"
+description = "non-positive occurrences of the inductive in a constructor are allowed"
+old = 'panic!("non-positive occurrence");'
+new = "{}"
+
+[mutant.large-elimination]
+file = "src/inductive.rs"
+description = "a proposition with several constructors eliminates into every universe"
+old = """
+                    // More than one constructor; no large elimination.
+                    _ => false,"""
+new = """
+                    // More than one constructor; no large elimination.
+                    _ => true,"""
+
+[mutant.recursor-rule-value]
+file = "src/inductive.rs"
+description = "a serialized recursor rule's value is not compared with the derived one"
+old = "self.assert_def_eq(ExprPtr::closed(imported_rr.val), rr_made_val);"
+new = "let _ = (imported_rr.val, rr_made_val);"
+
+[mutant.level-params-equal]
+file = "src/level.rs"
+description = "any two universe parameters compare as equal"
+old = "(Param(a, ..), Param(x, ..)) => a == x && diff >= 0,"
+new = "(Param(..), Param(..)) => diff >= 0,"
+
+[mutant.level-max-either]
+file = "src/level.rs"
+description = "max a b <= r holds when either side does, not both"
+old = "(Max(a, b, ..), _) => self.leq_core(a, r_in, diff) && self.leq_core(b, r_in, diff),"
+new = "(Max(a, b, ..), _) => self.leq_core(a, r_in, diff) || self.leq_core(b, r_in, diff),"
