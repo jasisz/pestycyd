@@ -311,6 +311,33 @@ definition unfolding) is either that binder shape or a constant of an
 inductive with zero constructors in `Prop`, in an axiom-free, safe-fragment
 document. The check is immune to name shadowing by construction.
 
+## Per-declaration verdicts
+
+Kernels answer once per document, so a disagreement says *that* checkers
+split, not *where*. `locate` names the declaration at which each refusing
+kernel first refuses. Checkers replay declarations in order and stop at the
+first refusal, so a verdict is monotone in the document prefix and a binary
+search over prefixes finds the boundary in `O(log n)` runs per kernel:
+
+```bash
+uv run pestycyd --config pestycyd.toml locate finding.ndjson \
+  --output cut.ndjson --report locate.json
+```
+
+```
+finding.ndjson: 32 declarations, 28 kernel runs
+  nanoda     reject at #13 def Nat.add._f: Invalid projection: PProd != Nat
+  official   reject at #13 def Nat.add._f: (kernel) invalid projection
+```
+
+A prefix ends with its last declaration; table records belong to the
+declaration that follows them, and the empty prefix keeps only the header,
+so a kernel refusing before any declaration is reported as such. Prefixes
+are cut, not renumbered, which keeps re-bound table identifiers intact.
+`--output` writes the document cut after the earliest refused declaration —
+the part a report needs. Each line quotes the kernel's reason: the message
+of a Rust panic, otherwise the first line that reads like a refusal.
+
 ## Discovery benchmark
 
 `bench/scenarios.toml` pins historical defect families without handing the

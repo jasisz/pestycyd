@@ -5,6 +5,7 @@ import dataclasses
 import hashlib
 import json
 import random
+import re
 import sys
 import tempfile
 import time
@@ -17,6 +18,7 @@ from .bench import run_bench
 from .campaigns import CAMPAIGNS, selected as selected_campaigns
 from .config import Config, KernelSpec, load_config
 from .generators import app_spine, con_k_params, deep_binder
+from .locate import declarations, first_refusal, prefix
 from .minimize import ddmin, well_formed_export
 from .ndjson import Document, Mutation, files
 from .outcomes import Outcome
@@ -738,6 +740,106 @@ def reduce_command(config: Config, kernels: tuple[KernelSpec, ...], args: argpar
     return 0
 
 
+REFUSAL_LINE = re.compile(r"invalid|mismatch|\(kernel\)|rejected|error|unknown", re.IGNORECASE)
+
+
+def _refusal_line(outcome: Outcome) -> str:
+    """The line that states why a kernel refused, else its last line.
+
+    Kernels bury the reason among progress logs, pretty-printed context
+    and usage hints.  A Rust panic states its message on the line after
+    the ``thread '...' panicked at`` header, so that line wins outright.
+    """
+    lines = [line.strip() for line in outcome.output.splitlines() if line.strip()]
+    panics = [
+        lines[position + 1]
+        for position, line in enumerate(lines[:-1])
+        if line.startswith("thread '") and "panicked" in line
+    ]
+    reasons = panics or [line for line in lines if REFUSAL_LINE.search(line)]
+    tail = reasons[0] if reasons else lines[-1] if lines else (outcome.error or "")
+    return tail if len(tail) <= 120 else tail[:117] + "..."
+
+
+def locate_command(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
+    """Name the declaration at which each refusing kernel first refuses."""
+    document = Document.load(args.input)
+    found = declarations(document)
+    full = run_matrix(kernels, args.input, args.workers)
+    located: dict[str, dict[str, object]] = {}
+    tests = len(kernels)
+    with tempfile.TemporaryDirectory(prefix="pestycyd-locate-") as directory:
+        for kernel in kernels:
+            outcome = full[kernel.name]
+            entry: dict[str, object] = {"status": outcome.status}
+            located[kernel.name] = entry
+            if outcome.status == "accept":
+                continue
+            candidate = Path(directory) / f"{kernel.name}.ndjson"
+            seen: dict[int, Outcome] = {len(found): outcome}
+
+            def accepts(count: int) -> bool:
+                nonlocal tests
+                if count not in seen:
+                    tests += 1
+                    candidate.write_text(prefix(document, found, count).render())
+                    seen[count] = run_matrix((kernel,), candidate)[kernel.name]
+                return seen[count].status == "accept"
+
+            boundary = first_refusal(len(found), accepts)
+            if boundary is None:
+                entry["declaration"] = None
+                entry["message"] = _refusal_line(seen[0])
+                continue
+            declaration = found[boundary - 1]
+            entry["declaration"] = {
+                "index": declaration.index,
+                "line": declaration.line,
+                "kind": declaration.kind,
+                "names": list(declaration.names),
+            }
+            entry["status"] = seen[boundary].status
+            entry["message"] = _refusal_line(seen[boundary])
+    width = max(len(name) for name in located)
+    print(f"{args.input}: {len(found)} declarations, {tests} kernel runs")
+    for name, entry in located.items():
+        if "declaration" not in entry:
+            print(f"  {name:<{width}}  accept")
+            continue
+        declaration = entry["declaration"]
+        where = (
+            "before any declaration"
+            if declaration is None
+            else found[declaration["index"] - 1].label  # type: ignore[index]
+        )
+        print(f"  {name:<{width}}  {entry['status']} at {where}: {entry['message']}")
+    boundaries = sorted(
+        {
+            entry["declaration"]["index"]  # type: ignore[index]
+            for entry in located.values()
+            if entry.get("declaration")
+        }
+    )
+    if args.output is not None and boundaries:
+        atomic_text(args.output, prefix(document, found, boundaries[0]).render())
+        print(f"prefix through {found[boundaries[0] - 1].label}: {args.output}")
+    if args.report is not None:
+        atomic_text(
+            args.report,
+            json.dumps(
+                {
+                    "schema": "pestycyd-locate-1",
+                    "file": str(args.input),
+                    "declarations": len(found),
+                    "kernels": located,
+                },
+                indent=2,
+            )
+            + "\n",
+        )
+    return 0
+
+
 def bench_command(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespace) -> int:
     return run_bench(config, args)
 
@@ -1003,6 +1105,19 @@ def parser() -> argparse.ArgumentParser:
         help="skip the well-formedness check on each canonicalized trial",
     )
     command.set_defaults(function=reduce_command)
+
+    command = sub.add_parser(
+        "locate",
+        help="name the declaration at which each refusing kernel first refuses",
+    )
+    command.add_argument("input", type=Path)
+    command.add_argument(
+        "--output",
+        type=Path,
+        help="write the document cut after the earliest refused declaration",
+    )
+    command.add_argument("--report", type=Path)
+    command.set_defaults(function=locate_command)
 
     command = sub.add_parser(
         "bench",
