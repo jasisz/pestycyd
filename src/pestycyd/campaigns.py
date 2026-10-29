@@ -12,6 +12,7 @@ from .transforms import (
     ZERO_DISGUISES,
     clonable_value,
     rename_safe,
+    sort_valued_telescope,
     swap_independent_declarations,
 )
 
@@ -1694,6 +1695,37 @@ def prop_impostor(document: Document) -> Iterable[Mutation]:
             rewrite=Rewrite("append-prop-impostor", len(document.lines) - 1, (), (variant,)),
         )
 
+def single_fault(document: Document) -> Iterable[Mutation]:
+    """Break exactly one kernel rule in an otherwise valid document.
+
+    Structural rewiring usually breaks several rules at once, so a checker
+    that skips one check still rejects on another and the gap stays
+    invisible.  Each mutation here is valid in every respect but one, which
+    makes acceptance by any checker a missing check, not a lucky miss.
+    """
+    lines = list(document.lines)
+    for line_no, kind in _typed_value_declarations(document):
+        yield Mutation(
+            "single-fault", f"let-ill-typed-{kind}", "guaranteed-reject",
+            line_no, (kind,), "value", "let-ill-typed",
+            "let value checked against its annotation",
+            rewrite=Rewrite("let-ill-typed", line_no, (kind,)),
+        )
+        if kind == "def" and sort_valued_telescope(lines, lines[line_no]["def"]["type"]):
+            yield Mutation(
+                "single-fault", "theorem-of-type", "guaranteed-reject",
+                line_no, ("def",), "kind", "thm",
+                "theorem type must be a proposition",
+                rewrite=Rewrite("theorem-of-type", line_no),
+            )
+    yield Mutation(
+        "single-fault", "undeclared-universe", "guaranteed-reject",
+        len(lines) - 1, (), "levelParams", "u",
+        "constant instantiated with an unbound universe parameter",
+        rewrite=Rewrite("append-undeclared-universe", len(lines) - 1),
+    )
+
+
 def metamorphic_beta(document: Document) -> Iterable[Mutation]:
     """Wrap declaration values in an identity application.
 
@@ -2048,6 +2080,12 @@ CAMPAIGNS: dict[str, Campaign] = {
         "Append def T : Sort (imax 0 1) := Nat and a reflexivity proof that any two T are equal.",
         ("is_prop up to level normalization", "proof irrelevance", "imax normalization"),
         prop_impostor,
+    ),
+    "single-fault": Campaign(
+        "single-fault", "guaranteed-reject",
+        "Break exactly one kernel rule (let value, theorem in Prop, bound universes) in a valid document.",
+        ("letTypeMismatch", "thmTypeIsNotProp", "undefined universe parameter"),
+        single_fault,
     ),
     "declaration-reordering": Campaign(
         "declaration-reordering", "guaranteed-accept",

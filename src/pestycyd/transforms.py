@@ -761,6 +761,108 @@ def append_prop_impostor(document: Document, variant: str, with_theorem: bool = 
     return Document(tuple(lines))
 
 
+# Single-fault rewrites.  Each breaks exactly one kernel rule in an
+# otherwise valid document: a checker missing that one check accepts,
+# while one that merely trips over collateral damage cannot hide behind
+# a different error.  Mutations that break several rules at once only
+# test whether a checker notices *something*.
+
+
+def let_ill_typed(document: Document, line_no: int, path: tuple[object, ...]) -> Document:
+    """Replace ``v`` with ``let x : T := T; v`` for a declaration ``T := v``.
+
+    ``T`` is a type, so the annotation is legal, and ``T : Sort u`` is never
+    ``T`` itself; ``v`` is closed and ignores ``x``, so the body and every
+    downstream use keep their types.  Only the let-value check fails.
+    """
+    lines = list(document.lines)
+    declaration = _declaration(lines, line_no, path)
+    type_id, value_id = declaration.get("type"), declaration.get("value")
+    if not isinstance(type_id, int) or not isinstance(value_id, int):
+        raise ValueError("declaration needs typed value")
+    fragment = [
+        {
+            FRESH: "ie",
+            "letE": {"name": 0, "nondep": True, "type": type_id, "value": type_id, "body": value_id},
+        },
+    ]
+    declaration["value"] = -1
+    result, local = _fragment_with_local_ids(lines, line_no, fragment)
+    _fix_local(result, [line_no + len(fragment)], local)
+    return Document(tuple(result))
+
+
+def sort_valued_telescope(lines: list[dict[str, object]], root: int) -> bool:
+    """Whether expression ``root`` is ``∀ ..., Sort (succ l)``: never a proposition."""
+    table = _expression_table(lines)
+    levels = {line["il"]: line for line in lines if isinstance(line.get("il"), int)}
+    seen = 0
+    node = table.get(root)
+    while isinstance(node, dict) and isinstance(node.get("forallE"), dict) and seen < 64:
+        node = table.get(node["forallE"].get("body"))  # type: ignore[arg-type]
+        seen += 1
+    if not isinstance(node, dict) or "sort" not in node:
+        return False
+    level = levels.get(node["sort"])  # type: ignore[arg-type]
+    return isinstance(level, dict) and "succ" in level
+
+
+def theorem_of_type(document: Document, line_no: int) -> Document:
+    """Retag ``def d : ∀ ..., Sort (u+1) := v`` as a theorem and cut after it.
+
+    The value still checks against the type; only the rule that a
+    theorem states a proposition fails.  Later declarations are cut so a
+    checker that does not unfold theorems cannot reject them instead.
+    """
+    lines = [copy.deepcopy(line) for line in document.lines[: line_no + 1]]
+    definition = lines[line_no].get("def")
+    if not isinstance(definition, dict) or not sort_valued_telescope(lines, definition.get("type")):  # type: ignore[arg-type]
+        raise ValueError("theorem-of-type needs a definition of a type family")
+    lines[line_no] = {
+        "thm": {key: definition[key] for key in ("all", "levelParams", "name", "type", "value") if key in definition}
+    }
+    return Document(tuple(lines))
+
+
+def append_undeclared_universe(document: Document) -> Document:
+    """Append ``def k.{v} : Type := Prop`` and ``def bad : Type := k.{u}``.
+
+    ``k``'s type ignores its universe, so ``k.{u}`` has type ``Type`` for
+    any ``u``: the only fault is that ``bad`` binds no ``u``.
+    """
+    lines = [copy.deepcopy(line) for line in document.lines]
+    used = {key: max([0, *(line[key] for line in lines if isinstance(line.get(key), int))]) for key in ("in", "il", "ie")}
+    next_in, next_il, next_ie = used["in"] + 1, used["il"] + 1, used["ie"] + 1
+
+    def record(key: str, **payload: object) -> int:
+        nonlocal next_in, next_il, next_ie
+        identifier = {"in": next_in, "il": next_il, "ie": next_ie}[key]
+        lines.append({key: identifier, **payload})
+        if key == "in":
+            next_in += 1
+        elif key == "il":
+            next_il += 1
+        else:
+            next_ie += 1
+        return identifier
+
+    k_name = record("in", str={"pre": 0, "str": "pestycydUniverseFree"})
+    bad_name = record("in", str={"pre": 0, "str": "pestycydUndeclaredUniverse"})
+    v_name = record("in", str={"pre": 0, "str": "v"})
+    u_name = record("in", str={"pre": 0, "str": "u"})
+    one = record("il", succ=0)
+    record("il", param=v_name)  # exporters emit a level for every declared parameter
+    u = record("il", param=u_name)
+    prop = record("ie", sort=0)
+    type_ = record("ie", sort=one)
+    lines.append({"def": {"all": [k_name], "hints": "abbrev", "levelParams": [v_name], "name": k_name,
+                          "safety": "safe", "type": type_, "value": prop}})
+    use = record("ie", const={"name": k_name, "us": [u]})
+    lines.append({"def": {"all": [bad_name], "hints": "abbrev", "levelParams": [], "name": bad_name,
+                          "safety": "safe", "type": type_, "value": use}})
+    return Document(tuple(lines))
+
+
 def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
     lines = [copy.deepcopy(line) for line in document.lines]
     if not 0 <= rewrite.line < len(lines):
@@ -778,6 +880,12 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return clone_value_dag(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "swap-declarations":
         return swap_declarations(Document(tuple(lines)), rewrite.line)
+    if kind == "let-ill-typed":
+        return let_ill_typed(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
+    if kind == "theorem-of-type":
+        return theorem_of_type(Document(tuple(lines)), rewrite.line)
+    if kind == "append-undeclared-universe":
+        return append_undeclared_universe(Document(tuple(lines)))
     if kind == "append-prop-impostor":
         return append_prop_impostor(Document(tuple(lines)), str(rewrite.params[0]))
     if kind == "disguise-prop-sort":

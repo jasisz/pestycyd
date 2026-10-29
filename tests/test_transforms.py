@@ -85,6 +85,45 @@ class TransformTests(unittest.TestCase):
         self.assertIn("def", control.lines[-1])
         self.assertEqual(list(CAMPAIGNS["prop-impostor"].generate(self.document)), [])
 
+    def test_single_fault_breaks_one_rule_and_stays_well_formed(self) -> None:
+        # A = fun (x : Prop) => x : Prop -> Prop, plus T : Type := Prop.
+        document = Document(
+            (
+                *self.document.lines[:-1],
+                {"ie": 3, "forallE": {"binderInfo": "default", "body": 0, "name": 1, "type": 0}},
+                def_line(1, 3, 2),
+                {"in": 2, "str": {"pre": 0, "str": "T"}},
+                {"il": 1, "succ": 0},
+                {"ie": 4, "sort": 1},
+                def_line(2, 4, 0),
+            )
+        )
+        mutations = {m.label: m for m in CAMPAIGNS["single-fault"].generate(document)}
+        self.assertEqual(set(mutations), {"let-ill-typed-def", "theorem-of-type", "undeclared-universe"})
+        self.assertTrue(all(m.oracle == "guaranteed-reject" for m in mutations.values()))
+        for mutation in mutations.values():
+            self.assert_well_formed(document.mutated(mutation))
+
+        retagged = document.mutated(mutations["theorem-of-type"])
+        self.assertEqual(retagged.lines[-1]["thm"]["name"], 2)
+        self.assertNotIn("safety", retagged.lines[-1]["thm"])
+
+        let = document.mutated(mutations["let-ill-typed-def"])
+        table = expr_table(let)
+        declaration = next(
+            line["def"] for line in let.lines if "def" in line and "letE" in table[line["def"]["value"]]
+        )
+        binding = table[declaration["value"]]["letE"]
+        self.assertEqual(binding["type"], binding["value"])
+        self.assertEqual(table[binding["value"]], table[declaration["type"]])
+
+        appended = document.mutated(mutations["undeclared-universe"])
+        bad = appended.lines[-1]["def"]
+        self.assertEqual(bad["levelParams"], [])
+        use = expr_table(appended)[bad["value"]]["const"]
+        levels = {line["il"]: line for line in appended.lines if "il" in line}
+        self.assertIn("param", levels[use["us"][0]])
+
     def test_wrap_eta_builds_expanded_lambda(self) -> None:
         document = Document(
             (
