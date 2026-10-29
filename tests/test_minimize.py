@@ -28,6 +28,16 @@ class MinimizeTests(unittest.TestCase):
         ]
         self.assertFalse(well_formed_export(lines))
 
+    def test_well_formed_export_accepts_string_literals(self) -> None:
+        lines = [
+            '{"meta":{}}',
+            '{"in":1,"str":{"pre":0,"str":"s"}}',
+            '{"ie":0,"strVal":"ab"}',
+            '{"ie":1,"sort":0}',
+            '{"axiom":{"all":[1],"levelParams":[],"name":1,"type":1}}',
+        ]
+        self.assertTrue(well_formed_export(lines))
+
 
 if __name__ == "__main__":
     unittest.main()

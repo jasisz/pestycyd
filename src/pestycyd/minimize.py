@@ -40,7 +40,7 @@ def well_formed_export(lines: list[str]) -> bool:
     def expression_record(row: dict[str, object]) -> bool:
         if "sort" in row:
             return level(row["sort"])
-        if "bvar" in row or "lit" in row or "natVal" in row or "strLit" in row:
+        if "bvar" in row or "lit" in row or "natVal" in row or "strLit" in row or "strVal" in row:
             return True
         const = row.get("const")
         if isinstance(const, dict):
