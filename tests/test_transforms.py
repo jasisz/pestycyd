@@ -5,6 +5,7 @@ from pestycyd.cli import _compose_lineage_oracle
 from pestycyd.minimize import well_formed_export
 from pestycyd.ndjson import Document
 from pestycyd.transforms import (
+    ZERO_DISGUISES,
     clonable_value,
     swap_independent_declarations,
     wrap_beta,
@@ -51,6 +52,21 @@ class TransformTests(unittest.TestCase):
 
     def assert_well_formed(self, document: Document) -> None:
         self.assertTrue(well_formed_export(document.render().splitlines()))
+
+    def test_prop_disguise_moves_one_reference_to_a_fresh_sort(self) -> None:
+        mutations = list(CAMPAIGNS["prop-disguise"].generate(self.document))
+        self.assertEqual([m.value for m in mutations], list(ZERO_DISGUISES))
+        nested = next(m for m in mutations if m.value == "imax-1-imax-1-0")
+        changed = self.document.mutated(nested)
+        self.assert_well_formed(changed)
+        levels = {line["il"]: line for line in changed.lines if "il" in line}
+        table = expr_table(changed)
+        declaration = next(line["def"] for line in changed.lines if "def" in line)
+        self.assertEqual(levels[table[declaration["type"]]["sort"]], {"il": 3, "imax": [1, 2]})
+        self.assertEqual(levels[2], {"il": 2, "imax": [1, 0]})
+        # The shared Sort 0 node still serves the lambda binder.
+        lam = next(line for line in changed.lines if "lam" in line)
+        self.assertEqual(table[lam["lam"]["type"]], {"ie": 0, "sort": 0})
 
     def test_wrap_eta_builds_expanded_lambda(self) -> None:
         document = Document(

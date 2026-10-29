@@ -643,6 +643,48 @@ def rename_safe(document: Document, name_id: int) -> bool:
     return root is not None and root not in SENSITIVE_NAME_ROOTS
 
 
+# Closed level expressions that normalize to zero.  Records reference each
+# other with negative local identifiers; the last record is the disguise.
+ZERO_DISGUISES: dict[str, list[dict[str, object]]] = {
+    "max-0-0": [{"max": [0, 0]}],
+    "imax-0-0": [{"imax": [0, 0]}],
+    "imax-1-0": [{"succ": 0}, {"imax": [-1, 0]}],
+    "max-imax-1-0": [{"succ": 0}, {"imax": [-1, 0]}, {"max": [-2, 0]}],
+    "imax-1-imax-1-0": [{"succ": 0}, {"imax": [-1, 0]}, {"imax": [-1, -2]}],
+}
+
+
+def disguise_prop_sort(
+    document: Document, line_no: int, path: tuple[object, ...], field: str, variant: str
+) -> Document:
+    """Point one ``Sort 0`` reference at a fresh ``Sort l`` with ``l`` closed and zero.
+
+    Only the named reference moves: the shared ``Sort 0`` node keeps serving
+    every other use, in particular derived recursor types, which checkers
+    compare exactly.  A conforming checker must still see ``Prop`` here —
+    the check whose absence was lean4#14613.
+    """
+    lines = [copy.deepcopy(line) for line in document.lines]
+    owner = _resolve(lines[line_no], path)
+    if owner is None or not isinstance(owner.get(field), int):
+        raise ValueError("rewrite path does not name an expression reference")
+    sorts = {line.get("ie"): line for line in lines if "sort" in line}
+    if sorts.get(owner[field], {}).get("sort") != 0:
+        raise ValueError("rewrite target does not reference Sort 0")
+    levels = [{FRESH: "il", **copy.deepcopy(record)} for record in ZERO_DISGUISES[variant]]
+    fragment = [*levels, {FRESH: "ie", "sort": -len(levels)}]
+    owner[field] = -1
+    result = _renumber(lines[:line_no] + fragment + lines[line_no:])
+    if result is None:
+        raise ValueError("document contains duplicate table identifiers")
+    level_ids = {-(index + 1): result[line_no + index]["il"] for index in range(len(levels))}
+    for position in range(line_no, line_no + len(levels) + 1):
+        _rewrite_references(result[position], {}, {}, level_ids, strict=False)
+    disguised = result[line_no + len(levels)]["ie"]
+    _rewrite_references(result[line_no + len(fragment)], {-1: disguised}, {}, {}, strict=False)
+    return Document(tuple(result))
+
+
 def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
     lines = [copy.deepcopy(line) for line in document.lines]
     if not 0 <= rewrite.line < len(lines):
@@ -660,4 +702,9 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return clone_value_dag(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "swap-declarations":
         return swap_declarations(Document(tuple(lines)), rewrite.line)
+    if kind == "disguise-prop-sort":
+        field, variant = rewrite.params
+        return disguise_prop_sort(
+            Document(tuple(lines)), rewrite.line, tuple(rewrite.path), str(field), str(variant)
+        )
     raise ValueError(f"unknown rewrite kind: {kind}")

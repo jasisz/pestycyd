@@ -6,7 +6,9 @@ from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
 from .ndjson import Document, Edit, LineEdit, Mutation, Rewrite, walk_objects
+from .rewrite import TRUSTED_PRELUDE, _declared, _name_strings
 from .transforms import (
+    ZERO_DISGUISES,
     clonable_value,
     rename_safe,
     swap_independent_declarations,
@@ -1629,6 +1631,48 @@ def _sole_name_declaration(document: Document, line_no: int, kind: str) -> bool:
     return users == 1
 
 
+def prop_disguise(document: Document) -> Iterable[Mutation]:
+    """Spell ``Prop`` as a closed level that only normalizes to zero.
+
+    One ``Sort 0`` reference written directly in a user declaration — an
+    inductive's own type, a declaration's type or value — is pointed at a
+    fresh ``Sort l`` with ``l`` such as ``imax 1 0``.  Derived recursors and
+    the trusted prelude are left alone: checkers compare recursors exactly and
+    pin the prelude by design.  A checker that now rejects decides Prop-ness
+    syntactically (lean4#14615); one that derives a large eliminator for the
+    disguised inductive is on the path of lean4#14613.
+    """
+    sorts = {
+        line["ie"]
+        for line in document.lines
+        if line.get("sort") == 0 and isinstance(line.get("ie"), int)
+    }
+    names = _name_strings(list(document.lines))
+    for line_no, line in enumerate(document.lines):
+        if any(names.get(name) in TRUSTED_PRELUDE for name in _declared(line)):
+            continue
+        sites: list[tuple[tuple[object, ...], str]] = []
+        for kind in DECLARATION_KINDS:
+            if isinstance(line.get(kind), dict):
+                sites += [((kind,), "type"), ((kind,), "value")]
+        block = line.get("inductive")
+        if isinstance(block, dict):
+            sites += [(("inductive", "types", index), "type") for index in range(len(block.get("types", [])))]
+        for path, field in sites:
+            owner = line
+            for part in path:
+                owner = owner[part]  # type: ignore[index]
+            if owner.get(field) not in sorts:  # type: ignore[union-attr]
+                continue
+            where = "-".join(str(part) for part in (*path, field))
+            for variant in ZERO_DISGUISES:
+                yield Mutation(
+                    "prop-disguise", f"{where}-{variant}", "guaranteed-accept",
+                    line_no, path, field, variant,
+                    "Prop recognized up to universe normalization",
+                    rewrite=Rewrite("disguise-prop-sort", line_no, path, (field, variant)),
+                )
+
 def metamorphic_beta(document: Document) -> Iterable[Mutation]:
     """Wrap declaration values in an identity application.
 
@@ -1971,6 +2015,12 @@ CAMPAIGNS: dict[str, Campaign] = {
         "Rebuild a shared value DAG as a private copy of the same term.",
         ("sharing-sensitive caches", "hash consing", "structural identity"),
         expression_unsharing,
+    ),
+    "prop-disguise": Campaign(
+        "prop-disguise", "guaranteed-accept",
+        "Rewrite one Sort 0 node to a closed level that normalizes to zero, e.g. imax 1 0.",
+        ("is_prop up to level normalization", "large elimination", "proof irrelevance"),
+        prop_disguise,
     ),
     "declaration-reordering": Campaign(
         "declaration-reordering", "guaranteed-accept",
