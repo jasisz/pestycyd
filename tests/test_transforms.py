@@ -5,7 +5,9 @@ from pestycyd.cli import _compose_lineage_oracle
 from pestycyd.minimize import well_formed_export
 from pestycyd.ndjson import Document
 from pestycyd.transforms import (
+    NONZERO_IMPOSTORS,
     ZERO_DISGUISES,
+    append_prop_impostor,
     clonable_value,
     swap_independent_declarations,
     wrap_beta,
@@ -67,6 +69,21 @@ class TransformTests(unittest.TestCase):
         # The shared Sort 0 node still serves the lambda binder.
         lam = next(line for line in changed.lines if "lam" in line)
         self.assertEqual(table[lam["lam"]["type"]], {"ie": 0, "sort": 0})
+
+    def test_prop_impostor_appends_a_valid_type_and_an_invalid_theorem(self) -> None:
+        from pathlib import Path
+
+        seed = Document.load(Path(__file__).resolve().parents[1] / "corpus/real/slice-s1.ndjson")
+        mutations = list(CAMPAIGNS["prop-impostor"].generate(seed))
+        self.assertEqual([m.value for m in mutations], list(NONZERO_IMPOSTORS))
+        self.assertTrue(all(m.oracle == "guaranteed-reject" for m in mutations))
+        changed = seed.mutated(mutations[0])
+        self.assert_well_formed(changed)
+        self.assertIn("thm", changed.lines[-1])
+        control = append_prop_impostor(seed, "imax-0-1", with_theorem=False)
+        self.assert_well_formed(control)
+        self.assertIn("def", control.lines[-1])
+        self.assertEqual(list(CAMPAIGNS["prop-impostor"].generate(self.document)), [])
 
     def test_wrap_eta_builds_expanded_lambda(self) -> None:
         document = Document(

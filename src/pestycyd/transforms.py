@@ -685,6 +685,82 @@ def disguise_prop_sort(
     return Document(tuple(result))
 
 
+# Closed level expressions equal to one that a careless normalizer could
+# mistake for zero (imax 0 1 is 1, not 0).  Same local-id convention.
+NONZERO_IMPOSTORS: dict[str, list[dict[str, object]]] = {
+    "imax-0-1": [{"succ": 0}, {"imax": [0, -1]}],
+    "max-0-1": [{"succ": 0}, {"max": [0, -1]}],
+    "imax-imax-0-0-1": [{"succ": 0}, {"imax": [0, 0]}, {"imax": [-2, -1]}],
+    "succ-imax-0-0": [{"imax": [0, 0]}, {"succ": -1}],
+    "imax-max-0-0-1": [{"max": [0, 0]}, {"succ": 0}, {"imax": [-1, -2]}],
+}
+
+
+def _declared_name_ids(lines: list[dict[str, object]]) -> dict[str, int]:
+    from .rewrite import _declared, _name_strings
+
+    names = _name_strings(lines)
+    return {names[name]: name for line in lines for name in _declared(line) if name in names}
+
+
+def append_prop_impostor(document: Document, variant: str, with_theorem: bool = True) -> Document:
+    """Append ``def T : Sort l := Nat`` and ``theorem t : ∀ x y : T, x = y``.
+
+    ``l`` is a closed level equal to one, so ``T`` is not a proposition and
+    ``t`` holds only by a proof irrelevance that does not apply.  A checker
+    accepting ``t`` normalizes ``l`` to zero; with ``0 = 1`` at ``T`` that is
+    a closed proof of ``False``.  Without the theorem the document is valid,
+    which separates an impostor bug from incomplete level normalization.
+    """
+    lines = [copy.deepcopy(line) for line in document.lines]
+    declared = _declared_name_ids(lines)
+    if not {"Nat", "Eq", "Eq.refl"} <= declared.keys():
+        raise ValueError("prop impostor needs Nat, Eq and Eq.refl")
+    used = {key: max([0, *(line[key] for line in lines if isinstance(line.get(key), int))]) for key in ("in", "il", "ie")}
+    next_in, next_il, next_ie = used["in"] + 1, used["il"] + 1, used["ie"] + 1
+
+    def name(text: str) -> int:
+        nonlocal next_in
+        lines.append({"in": next_in, "str": {"pre": 0, "str": text}})
+        next_in += 1
+        return next_in - 1
+
+    def expr(**record: object) -> int:
+        nonlocal next_ie
+        lines.append({"ie": next_ie, **record})
+        next_ie += 1
+        return next_ie - 1
+
+    local: dict[int, int] = {}
+    for index, record in enumerate(NONZERO_IMPOSTORS[variant]):
+        level = {key: (local[value] if isinstance(value, int) and value < 0 else value) for key, value in record.items() if key != "max" and key != "imax"}
+        for key in ("max", "imax"):
+            if key in record:
+                level[key] = [local.get(value, value) for value in record[key]]  # type: ignore[union-attr]
+        lines.append({"il": next_il, **level})
+        local[-(index + 1)] = next_il
+        next_il += 1
+    impostor = next_il - 1
+
+    t_name, thm_name, x_name, y_name = (name(text) for text in ("pestycydT", "pestycydImpostor", "x", "y"))
+    sort = expr(sort=impostor)
+    nat = expr(const={"name": declared["Nat"], "us": []})
+    lines.append({"def": {"all": [t_name], "hints": "abbrev", "levelParams": [], "name": t_name, "safety": "safe", "type": sort, "value": nat}})
+    if with_theorem:
+        t = expr(const={"name": t_name, "us": []})
+        x, y = expr(bvar=1), expr(bvar=0)
+        eq_t = expr(app={"fn": expr(const={"name": declared["Eq"], "us": [impostor]}), "arg": t})
+        body = expr(app={"fn": expr(app={"fn": eq_t, "arg": x}), "arg": y})
+        statement = expr(forallE={"binderInfo": "default", "name": x_name, "type": t,
+                                  "body": expr(forallE={"binderInfo": "default", "name": y_name, "type": t, "body": body})})
+        refl_t = expr(app={"fn": expr(const={"name": declared["Eq.refl"], "us": [impostor]}), "arg": t})
+        proof = expr(lam={"binderInfo": "default", "name": x_name, "type": t,
+                          "body": expr(lam={"binderInfo": "default", "name": y_name, "type": t,
+                                            "body": expr(app={"fn": refl_t, "arg": x})})})
+        lines.append({"thm": {"all": [thm_name], "levelParams": [], "name": thm_name, "type": statement, "value": proof}})
+    return Document(tuple(lines))
+
+
 def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
     lines = [copy.deepcopy(line) for line in document.lines]
     if not 0 <= rewrite.line < len(lines):
@@ -702,6 +778,8 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return clone_value_dag(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "swap-declarations":
         return swap_declarations(Document(tuple(lines)), rewrite.line)
+    if kind == "append-prop-impostor":
+        return append_prop_impostor(Document(tuple(lines)), str(rewrite.params[0]))
     if kind == "disguise-prop-sort":
         field, variant = rewrite.params
         return disguise_prop_sort(

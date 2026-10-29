@@ -8,6 +8,7 @@ from typing import Callable, Iterable
 from .ndjson import Document, Edit, LineEdit, Mutation, Rewrite, walk_objects
 from .rewrite import TRUSTED_PRELUDE, _declared, _name_strings
 from .transforms import (
+    NONZERO_IMPOSTORS,
     ZERO_DISGUISES,
     clonable_value,
     rename_safe,
@@ -1673,6 +1674,26 @@ def prop_disguise(document: Document) -> Iterable[Mutation]:
                     rewrite=Rewrite("disguise-prop-sort", line_no, path, (field, variant)),
                 )
 
+def prop_impostor(document: Document) -> Iterable[Mutation]:
+    """Append a type in ``Sort l`` with ``l`` closed and equal to one.
+
+    ``def T : Sort (imax 0 1) := Nat`` is valid; ``theorem : ∀ x y : T, x = y``
+    by reflexivity is not, because ``T`` is no proposition.  A checker that
+    accepts it normalizes ``l`` to zero and grants proof irrelevance to
+    ``Nat`` — a closed ``0 = 1`` away from ``False``.
+    """
+    names = _name_strings(list(document.lines))
+    declared = {names.get(name) for line in document.lines for name in _declared(line)}
+    if not {"Nat", "Eq", "Eq.refl"} <= declared:
+        return
+    for variant in NONZERO_IMPOSTORS:
+        yield Mutation(
+            "prop-impostor", variant, "guaranteed-reject",
+            len(document.lines) - 1, (), "level", variant,
+            "is_prop must not mistake a nonzero level for zero",
+            rewrite=Rewrite("append-prop-impostor", len(document.lines) - 1, (), (variant,)),
+        )
+
 def metamorphic_beta(document: Document) -> Iterable[Mutation]:
     """Wrap declaration values in an identity application.
 
@@ -2021,6 +2042,12 @@ CAMPAIGNS: dict[str, Campaign] = {
         "Rewrite one Sort 0 node to a closed level that normalizes to zero, e.g. imax 1 0.",
         ("is_prop up to level normalization", "large elimination", "proof irrelevance"),
         prop_disguise,
+    ),
+    "prop-impostor": Campaign(
+        "prop-impostor", "guaranteed-reject",
+        "Append def T : Sort (imax 0 1) := Nat and a reflexivity proof that any two T are equal.",
+        ("is_prop up to level normalization", "proof irrelevance", "imax normalization"),
+        prop_impostor,
     ),
     "declaration-reordering": Campaign(
         "declaration-reordering", "guaranteed-accept",
