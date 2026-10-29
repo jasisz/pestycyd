@@ -4,5 +4,6 @@
   "unsafe_permit_all_axioms": true,
   "nat_extension": true,
   "string_extension": true,
-  "print_success_message": true
+  "print_success_message": true,
+  "declaration_timeout_secs": 120
 }

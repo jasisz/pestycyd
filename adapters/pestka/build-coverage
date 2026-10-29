@@ -23,6 +23,10 @@ else
 fi
 
 mkdir -p "$out/build-profiles"
+# Pestka's aver.toml builds with panic = "abort", and an aborted process
+# never writes its .profraw: a run that panics would leave no coverage.
+# Unwinding is overridden here, for this build only.
+export CARGO_PROFILE_RELEASE_PANIC=unwind
 target=${RUST_TARGET:-$(rustc -vV | sed -n 's/^host: //p')}
 LLVM_PROFILE_FILE="$out/build-profiles/pestycyd-%p-%m.profraw" \
 RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C instrument-coverage" \
