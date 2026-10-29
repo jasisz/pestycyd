@@ -187,6 +187,16 @@ on. Initial mutations are scheduled round-robin across seeds, so one large
 export cannot starve smaller cases. `--semantic-only` keeps crash and timeout
 noise out of findings without removing it from search feedback.
 
+`--protect-prelude` freezes the constants the official kernel trusts by name
+(`Nat.add` and the other literal fast paths, `String`, `Char.ofNat`, `Quot`,
+...) together with everything they reach, including the declarations of
+constants they use. Lean's threat model assumes the official prelude: a
+`False` obtained by redefining `Nat.add` is "not a bug"
+([lean4#15908](https://github.com/leanprover/lean4/issues/15908), the
+[kernel bug hunt guide](https://hackmd.io/Tu2Z97xHSQilI7b91HQfAw)), so a hunt
+aimed at reportable findings should never mutate that cone. It does not
+detect a seed whose prelude is already non-standard.
+
 For a soundness hunt, exact outcome expectations keep `reject`/`decline`
 differences from becoming findings:
 

@@ -395,6 +395,104 @@ def canonicalize(document: Document) -> Document | None:
     return Document(tuple(rewritten))
 
 
+# Constants the official kernel special-cases by name (literal fast paths,
+# string-literal expansion, quotient reduction).  Lean's threat model trusts
+# the official prelude for these: replacing one is adversarial input, not a
+# kernel bug (lean4#15908, "Kernel bug hunt" guide), so a hunt must never
+# mutate them or anything they depend on.
+TRUSTED_PRELUDE = frozenset(
+    {
+        "Nat", "Nat.add", "Nat.sub", "Nat.mul", "Nat.div", "Nat.mod", "Nat.gcd",
+        "Nat.beq", "Nat.ble", "Nat.land", "Nat.lor", "Nat.xor", "Nat.shiftLeft",
+        "Nat.shiftRight", "Nat.pow", "Nat.log2", "Nat.pred",
+        "String", "String.mk", "String.ofList", "Char", "Char.ofNat", "List", "Bool",
+        "Eq", "Quot", "Quot.mk", "Quot.lift", "Quot.ind",
+    }
+)
+
+
+def _name_strings(lines: list[dict[str, object]]) -> dict[int, str]:
+    names: dict[int, str] = {0: ""}
+    for line in lines:
+        identifier = line.get("in")
+        if not isinstance(identifier, int):
+            continue
+        payload = line.get("str") or line.get("num")
+        if not isinstance(payload, dict):
+            continue
+        prefix = names.get(payload.get("pre"), "")  # type: ignore[arg-type]
+        part = payload.get("str") if "str" in line else payload.get("i")
+        names[identifier] = f"{prefix}.{part}" if prefix else str(part)
+    return names
+
+
+def _declared(line: dict[str, object]) -> list[int]:
+    for kind in (*DECLARATION_KINDS, "quot"):
+        declaration = line.get(kind)
+        if isinstance(declaration, dict) and isinstance(declaration.get("name"), int):
+            return [declaration["name"]]
+    block = line.get("inductive")
+    if not isinstance(block, dict):
+        return []
+    return [
+        item["name"]
+        for group in INDUCTIVE_GROUPS
+        for item in block.get(group, [])
+        if isinstance(item, dict) and isinstance(item.get("name"), int)
+    ]
+
+
+def prelude_lines(document: Document, trusted: frozenset[str] = TRUSTED_PRELUDE) -> frozenset[int]:
+    """Return the lines defining trusted prelude constants and everything they reach.
+
+    The closure follows expression, level, and name references and, through
+    ``const`` nodes, the declarations of referenced constants: rewriting
+    ``Nat.brecOn`` changes ``Nat.add`` as surely as rewriting ``Nat.add``.
+    """
+    lines = list(document.lines)
+    names = _name_strings(lines)
+    tables: dict[tuple[str, int], int] = {}
+    declarations: dict[int, int] = {}
+    for line_no, line in enumerate(lines):
+        declared = declares_table_id(line)
+        if declared is not None:
+            tables[declared] = line_no
+        for name in _declared(line):
+            declarations.setdefault(name, line_no)
+
+    pending = [line_no for name, line_no in declarations.items() if names.get(name) in trusted]
+    protected: set[int] = set()
+    while pending:
+        line_no = pending.pop()
+        if line_no in protected:
+            continue
+        protected.add(line_no)
+        line = lines[line_no]
+        references: list[tuple[str, object]] = []
+        for key, sites in (
+            ("ie", expression_reference_sites),
+            ("in", name_reference_sites),
+            ("il", level_reference_sites),
+        ):
+            for path, field in sites(line):
+                obj = _resolve(line, path)
+                if obj is not None and field in obj:
+                    references.append((key, obj[field]))
+        quot = line.get("quot")
+        if isinstance(quot, dict):
+            references += [("in", quot.get("name")), ("in", quot.get("levelParams")), ("ie", quot.get("type"))]
+        const = line.get("const")
+        if isinstance(const, dict) and const.get("name") in declarations:
+            pending.append(declarations[const["name"]])  # type: ignore[index]
+        for key, value in references:
+            if key == "in" and isinstance(value, dict):
+                value = value.get("pre")
+            for identifier in value if isinstance(value, list) else [value]:
+                if isinstance(identifier, int) and (key, identifier) in tables:
+                    pending.append(tables[(key, identifier)])
+    return frozenset(protected)
+
+
 def renumber(document: Document) -> Document | None:
     """Renumber tables densely without dropping any records."""
     try:

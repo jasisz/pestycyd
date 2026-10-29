@@ -2,7 +2,16 @@ import unittest
 
 from pestycyd.ndjson import Document
 from pestycyd.minimize import well_formed_export
-from pestycyd.rewrite import canonical_false_theorem, canonicalize, renumber
+from pathlib import Path
+
+from pestycyd.rewrite import (
+    _declared,
+    _name_strings,
+    canonical_false_theorem,
+    canonicalize,
+    prelude_lines,
+    renumber,
+)
 
 
 META = {"meta": {"format": {"version": "3.1.0"}}}
@@ -245,6 +254,27 @@ class CanonicalFalseTheoremTests(unittest.TestCase):
         )
         self.assertFalse(canonical_false_theorem(document))
 
+
+
+class PreludeLinesTests(unittest.TestCase):
+    def test_trusted_constants_and_their_dependencies_are_frozen(self) -> None:
+        path = Path(__file__).resolve().parents[1] / "corpus/real/slice-s1.ndjson"
+        document = Document.load(path)
+        lines = list(document.lines)
+        names = _name_strings(lines)
+        protected = prelude_lines(document)
+        state = {
+            names[name]: line_no in protected
+            for line_no, line in enumerate(lines)
+            for name in _declared(line)
+        }
+        # Nat.add is trusted by name; it is defined through Nat.brecOn.
+        self.assertTrue(state["Nat.add"])
+        self.assertTrue(state["Nat.brecOn"])
+        self.assertTrue(state["Nat.rec"])
+        # User-level instances and theorems stay mutable.
+        self.assertFalse(state["instAddNat"])
+        self.assertFalse(state["proofIrr"])
 
 if __name__ == "__main__":
     unittest.main()

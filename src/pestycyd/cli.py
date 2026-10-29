@@ -20,7 +20,7 @@ from .generators import app_spine, con_k_params, deep_binder
 from .minimize import ddmin, well_formed_export
 from .ndjson import Document, Mutation, files
 from .outcomes import Outcome
-from .rewrite import canonical_false_theorem, canonicalize, renumber
+from .rewrite import canonical_false_theorem, canonicalize, prelude_lines, renumber
 from .runner import run_matrix, run_probe
 from .store import FindingStore, atomic_text
 
@@ -254,6 +254,7 @@ class HuntParams:
     behavior_feedback: bool = False
     feedback_depth_first: bool = False
     protect_final_goal: bool = False
+    protect_prelude: bool = False
     finding_expect: dict[str, str] = dataclasses.field(default_factory=dict)
     finding_require_seed_change: bool = False
     budget_seconds: float | None = None
@@ -357,6 +358,12 @@ def run_hunt(
     seen_feedback: set[str] = set()
     seen_inputs: set[str] = set()
 
+    def protected_lines(document: Document) -> frozenset[int]:
+        lines = document.final_goal_lines() if params.protect_final_goal else frozenset()
+        if params.protect_prelude:
+            lines |= prelude_lines(document)
+        return lines
+
     def allowed(mutation: Mutation, protected: frozenset[int]) -> bool:
         return (
             mutation.line not in protected
@@ -384,9 +391,7 @@ def run_hunt(
         seen_feedback.update(
             feedback_features(baseline, include_behavior=params.behavior_feedback)
         )
-        protected = (
-            document.final_goal_lines() if params.protect_final_goal else frozenset()
-        )
+        protected = protected_lines(document)
         seed_matches_finding = bool(finding_expect) and matches_expectations(
             finding_expect, baseline
         )
@@ -453,9 +458,7 @@ def run_hunt(
                 oracle = _compose_lineage_oracle(parent_oracle, original.oracle)
             mutation = original if oracle == original.oracle else dataclasses.replace(original, oracle=oracle)
             child = document.mutated(mutation)
-            child_protected = (
-                child.final_goal_lines() if params.protect_final_goal else frozenset()
-            )
+            child_protected = protected_lines(child)
             content = child.render()
             content_digest = hashlib.sha256(content.encode()).hexdigest()
             if content_digest in seen_inputs:
@@ -596,6 +599,7 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
         behavior_feedback=getattr(args, "behavior_feedback", False),
         feedback_depth_first=getattr(args, "feedback_depth_first", False),
         protect_final_goal=getattr(args, "protect_final_goal", False),
+        protect_prelude=getattr(args, "protect_prelude", False),
         finding_expect=dict(getattr(args, "finding_expect", ())),
         finding_require_seed_change=getattr(args, "finding_require_seed_change", False),
         budget_seconds=getattr(args, "budget_seconds", None),
@@ -935,6 +939,14 @@ def parser() -> argparse.ArgumentParser:
         help=(
             "never mutate the last theorem declaration or any expression node reachable "
             "from its type"
+        ),
+    )
+    command.add_argument(
+        "--protect-prelude",
+        action="store_true",
+        help=(
+            "never mutate constants the kernel trusts by name (Nat.add, String, Quot, ...) "
+            "or anything they depend on; Lean's threat model assumes the official prelude"
         ),
     )
     command.add_argument(
