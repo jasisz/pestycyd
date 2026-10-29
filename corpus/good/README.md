@@ -22,3 +22,4 @@ primitive reductions, inductives, and imported recursors whenever possible.
 | `swapbox.ndjson` | Compact declaration pair sharing a boxed universe parameter; seed for level-param swap campaigns. |
 | `reversed-reference.ndjson` | Well-formed input whose record order is reversed against the usual emission order; stresses position-independent checking. |
 
+| `mutual-recursor-application.ndjson` | `cyclic-rec` plus a def that actually applies `M1.rec` with both mutual motives and all three minors — the first seed exercising eliminator *use*, not just declaration. |
