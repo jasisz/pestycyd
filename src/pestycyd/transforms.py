@@ -841,6 +841,11 @@ class _Appender:
         return identifier
 
     def name(self, text: str) -> int:
+        # Reuse an existing atom: checkers built on nanoda's tables reject a
+        # name bound twice, which would mask the fault being appended.
+        for line in self.lines:
+            if isinstance(line.get("in"), int) and line.get("str") == {"pre": 0, "str": text}:
+                return line["in"]  # type: ignore[return-value]
         return self.add("in", str={"pre": 0, "str": text})
 
     def pi(self, name: int, domain: int, body: int, implicit: bool = False) -> int:
@@ -952,6 +957,68 @@ def append_field_inductive(document: Document, fault: str) -> Document:
         "recs": [{"all": [i_name], "isUnsafe": False, "k": False, "levelParams": [u_name], "name": rec_name,
                   "numIndices": 0, "numMinors": 1, "numMotives": 1, "numParams": 0,
                   "rules": [{"ctor": mk_name, "nfields": 1, "rhs": rhs}], "type": rec_type}],
+    }})
+    return Document(tuple(lines))
+
+
+# Where append_undeclared_inductive puts the unbound universe ``u``.
+UNDECLARED_INDUCTIVE_SITES = ("type", "ctor")
+
+
+def append_undeclared_inductive(document: Document, site: str, declared: bool = False) -> Document:
+    """Append an inductive block whose types mention a universe ``u``.
+
+    ``type``: ``inductive U : Sort (u+1) | mk : U`` with its large recursor.
+    ``ctor``: ``inductive I : Prop | mk : Sort u → I`` with its small one;
+    the type is closed, so only the constructor (and the recursor it
+    induces) mention ``u``.  Without ``declared`` no member of the block
+    binds ``u``, which is the only fault (nanoda checks inductive blocks
+    without the declaration's universe parameters); with it the block is
+    the valid control ``U.{u}`` / ``I.{u}``.
+    """
+    if site not in UNDECLARED_INDUCTIVE_SITES:
+        raise ValueError(f"unknown undeclared-universe site: {site}")
+    lines = [copy.deepcopy(line) for line in document.lines]
+    out = _Appender(lines)
+    i_name = out.name("PestycydUnbound" + ("Type" if site == "type" else "Ctor"))
+    mk_name = out.add("in", str={"pre": i_name, "str": "mk"})
+    rec_name = out.add("in", str={"pre": i_name, "str": "rec"})
+    # Lean names the elimination level ``u_1`` when the block already uses ``u``.
+    u_name, w_name, motive_name, t_name, a_name = (out.name(text) for text in ("u", "u_1", "motive", "t", "a"))
+    u = out.add("il", param=u_name)
+    params = [u_name] if declared else []
+    us = [u] if declared else []
+    i = out.add("ie", const={"name": i_name, "us": us})
+    mk = out.add("ie", const={"name": mk_name, "us": us})
+    b0, b1, b2 = (out.add("ie", bvar=index) for index in range(3))
+    if site == "type":
+        w = out.add("il", param=w_name)
+        i_type, ctor_type = out.add("ie", sort=out.add("il", succ=u)), i
+        motive_type = out.pi(t_name, i, out.add("ie", sort=w))
+        minor = out.app(b0, mk)
+        # fun motive mk => mk.
+        rhs = out.lam(motive_name, motive_type, out.lam(mk_name, minor, b0))
+        fields, rec_params = 0, [w_name, *params]
+    else:
+        sort_u = out.add("ie", sort=u)
+        i_type, ctor_type = out.add("ie", sort=0), out.pi(a_name, sort_u, i)
+        motive_type = out.pi(t_name, i, i_type)
+        # Under motive: ∀ (a : Sort u), motive (mk a).
+        minor = out.pi(a_name, sort_u, out.app(b1, out.app(mk, b0)))
+        # fun motive mk a => mk a.
+        rhs = out.lam(motive_name, motive_type, out.lam(mk_name, minor, out.lam(a_name, sort_u, out.app(b1, b0))))
+        fields, rec_params = 1, params
+    # ∀ {motive}, ∀ (mk : minor), ∀ (t : I), motive t.
+    rec_type = out.pi(motive_name, motive_type, out.pi(mk_name, minor, out.pi(t_name, i, out.app(b2, b0))), implicit=True)
+    lines.append({"inductive": {
+        "types": [{"all": [i_name], "ctors": [mk_name], "isRec": False, "isReflexive": False, "isUnsafe": False,
+                   "levelParams": params, "name": i_name, "numIndices": 0, "numNested": 0, "numParams": 0,
+                   "type": i_type}],
+        "ctors": [{"cidx": 0, "induct": i_name, "isUnsafe": False, "levelParams": params, "name": mk_name,
+                   "numFields": fields, "numParams": 0, "type": ctor_type}],
+        "recs": [{"all": [i_name], "isUnsafe": False, "k": False, "levelParams": rec_params, "name": rec_name,
+                  "numIndices": 0, "numMinors": 1, "numMotives": 1, "numParams": 0,
+                  "rules": [{"ctor": mk_name, "nfields": fields, "rhs": rhs}], "type": rec_type}],
     }})
     return Document(tuple(lines))
 
@@ -1071,6 +1138,8 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return append_field_inductive(Document(tuple(lines)), str(rewrite.params[0]))
     if kind == "append-undeclared-universe":
         return append_undeclared_universe(Document(tuple(lines)))
+    if kind == "append-undeclared-inductive":
+        return append_undeclared_inductive(Document(tuple(lines)), str(rewrite.params[0]))
     if kind == "append-prop-impostor":
         return append_prop_impostor(Document(tuple(lines)), str(rewrite.params[0]))
     if kind == "disguise-prop-sort":

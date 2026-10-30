@@ -1747,6 +1747,13 @@ def single_fault(document: Document) -> Iterable[Mutation]:
         "constant instantiated with an unbound universe parameter",
         rewrite=Rewrite("append-undeclared-universe", len(lines) - 1),
     )
+    for site in ("type", "ctor"):
+        yield Mutation(
+            "single-fault", f"undeclared-universe-inductive-{site}", "guaranteed-reject",
+            len(lines) - 1, (), "inductive", site,
+            "inductive block mentions a universe parameter it does not declare",
+            rewrite=Rewrite("append-undeclared-inductive", len(lines) - 1, (), (site,)),
+        )
 
 
 def metamorphic_beta(document: Document) -> Iterable[Mutation]:

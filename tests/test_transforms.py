@@ -7,9 +7,11 @@ from pestycyd.ndjson import Document
 from pestycyd.transforms import (
     FIELD_FAULTS,
     NONZERO_IMPOSTORS,
+    UNDECLARED_INDUCTIVE_SITES,
     ZERO_DISGUISES,
     append_field_inductive,
     append_prop_impostor,
+    append_undeclared_inductive,
     clonable_value,
     swap_independent_declarations,
     wrap_beta,
@@ -106,6 +108,7 @@ class TransformTests(unittest.TestCase):
             {
                 "let-ill-typed-def", "theorem-of-type", "undeclared-universe", "non-positive",
                 "field-too-large", "large-elimination-two-ctors", "large-elimination-data-field",
+                "undeclared-universe-inductive-type", "undeclared-universe-inductive-ctor",
             },
         )
         self.assertTrue(all(m.oracle == "guaranteed-reject" for m in mutations.values()))
@@ -141,6 +144,19 @@ class TransformTests(unittest.TestCase):
             (ctor,) = block["ctors"]
             self.assertEqual(rec["rules"], [{"ctor": ctor["name"], "nfields": 1, "rhs": rec["rules"][0]["rhs"]}])
             self.assertEqual(block["types"][0]["isRec"], fault == "non-positive")
+
+    def test_undeclared_inductive_binds_its_universe_only_in_the_control(self) -> None:
+        for site in UNDECLARED_INDUCTIVE_SITES:
+            for declared in (False, True):
+                changed = append_undeclared_inductive(self.document, site, declared)
+                self.assert_well_formed(changed)
+                block = changed.lines[-1]["inductive"]
+                (ty,), (ctor,), (rec,) = block["types"], block["ctors"], block["recs"]
+                names = {line["in"]: line["str"]["str"] for line in changed.lines if "in" in line and "str" in line}
+                expected = ["u"] if declared else []
+                self.assertEqual([names[n] for n in ty["levelParams"]], expected)
+                self.assertEqual([names[n] for n in ctor["levelParams"]], expected)
+                self.assertEqual([names[n] for n in rec["levelParams"]], (["u_1"] if site == "type" else []) + expected)
 
     def test_extra_recursor_copies_the_first_recursor_under_a_new_name(self) -> None:
         from pathlib import Path
