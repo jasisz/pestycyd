@@ -34,3 +34,18 @@ primitive reductions, inductives, and imported recursors whenever possible.
 | `unit-eta.ndjson` | Unit eta at three levels: `PUnit.{0}` (Prop), `PUnit.{1}` (Type), and `True` — `∀p. Eq p unit := rfl` — unanimous. |
 | `acc2-prop-iota.ndjson` | `Acc2.rec` with a Prop-valued motive (`λa t. Acc2 Prop r a`, `u=0` subsingleton elimination): `rec ... (intro x h) ≡ Acc2.intro x h` via `rfl` — unanimous; completes the Acc-family matrix (Type + Prop motives). |
 | `quotord5-indlift.ndjson` | `quot` record order permuted `type,ctor,ind,lift` (the only other order preserving name/expr binding) — accepted by all incl. official+paranoid: canonical order is NOT required, records verify independently per-name. Confirms the `qstated` duplicate-marking fix in pestka models reference semantics exactly. |
+
+Generated from `lean/PestycydSeeds.lean` (Lean 4.35.0): one bundle theorem per
+seed, exported with its dependencies and merged with `rewrite.share`
+(lean4export panics when given four or more names, hence the bundles):
+
+```bash
+lean -o PestycydSeeds.olean PestycydSeeds.lean
+LEAN_PATH=.:$(lean --print-prefix)/lib/lean leanexport PestycydSeeds -- prop_rec_bundle > prop-rec-family.ndjson
+```
+
+| Input | Purpose |
+| --- | --- |
+| `nested-indexed-iota.ndjson` | `ITree α : Nat → Type u` nesting `List (ITree α 0)` under an index, with `size`/`sum` by structural recursion through the nested auxiliary recursor, closed by `rfl`/`decide`. Accepted by all 13 configured checkers. |
+| `prop-rec-family.ndjson` | Recursive `Prop` families: indexed `Ev : Nat → Prop` (inversion `Ev (n+2) → Ev n`, `¬ Ev 1` via `nomatch`) and the reflexive accessibility-like `WF r x` eliminated with an explicit motive. Accepted by all 13. |
+| `quot-universe-poly.ndjson` | `Quot` over `Sort u` with `Quot.lift` into `Sort v`, `Quot.lift`-on-`Quot.mk` reduction by `rfl`, and `Quot.ind` + `Quot.sound` proving the quotient a subsingleton, used at `Nat` and `Prop`. Accepted by all 13. |
