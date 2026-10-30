@@ -11,6 +11,7 @@ from pestycyd.rewrite import (
     canonicalize,
     prelude_lines,
     renumber,
+    share,
 )
 
 
@@ -28,6 +29,35 @@ def def_line(name: int, type_id: int, value_id: int) -> dict[str, object]:
             "value": value_id,
         }
     }
+
+
+class ShareTests(unittest.TestCase):
+    def test_merges_repeated_records_through_their_references(self) -> None:
+        # Two fragments each interned ``x`` and ``fun x : Prop => x``.
+        document = Document(
+            (
+                META,
+                {"in": 1, "str": {"pre": 0, "str": "x"}},
+                {"ie": 0, "sort": 0},
+                {"ie": 1, "bvar": 0},
+                {"ie": 2, "lam": {"binderInfo": "default", "name": 1, "type": 0, "body": 1}},
+                {"in": 2, "str": {"pre": 0, "str": "x"}},
+                {"ie": 3, "bvar": 0},
+                {"ie": 4, "lam": {"binderInfo": "default", "name": 2, "type": 0, "body": 3}},
+                {"ie": 5, "forallE": {"binderInfo": "default", "name": 1, "type": 0, "body": 0}},
+                {"in": 3, "str": {"pre": 0, "str": "a"}},
+                def_line(3, 5, 4),
+            )
+        )
+        shared = share(document)
+        assert shared is not None
+        self.assertTrue(well_formed_export(shared.render().splitlines()))
+        self.assertEqual(len(shared.lines), len(document.lines) - 3)
+        self.assertEqual(shared.lines[-1]["def"]["value"], 2)
+
+    def test_duplicate_table_identifiers_are_left_alone(self) -> None:
+        document = Document((META, {"ie": 0, "sort": 0}, {"ie": 0, "bvar": 0}))
+        self.assertIsNone(share(document))
 
 
 class CanonicalizeTests(unittest.TestCase):

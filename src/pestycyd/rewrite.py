@@ -17,6 +17,7 @@ Everything here is deterministic: no randomness, no wall-clock input.
 from __future__ import annotations
 
 import copy
+import json
 from typing import Iterator
 
 from .ndjson import Document
@@ -492,6 +493,46 @@ def prelude_lines(document: Document, trusted: frozenset[str] = TRUSTED_PRELUDE)
                 if isinstance(identifier, int) and (key, identifier) in tables:
                     pending.append(tables[(key, identifier)])
     return frozenset(protected)
+
+
+def share(document: Document) -> Document | None:
+    """Merge structurally equal table records, then renumber densely.
+
+    Lean's exporter interns every name, level and expression once; hand-
+    assembled documents can repeat one (``bvar 0`` from two fragments).  The
+    official kernel tolerates that, but nanoda-family checkers refuse it
+    (``Attempted to insert duplicate Name``/``Expr``), which hides every
+    other verdict of theirs on the document.  Records reference only earlier
+    ones, so one pass in order sees each record with its references already
+    merged.
+    """
+    seen: set[tuple[str, int]] = set()
+    for line in document.lines:
+        declared = declares_table_id(line)
+        if declared is not None:
+            if declared in seen:
+                return None
+            seen.add(declared)
+    merged: dict[str, dict[int, int]] = {"in": {}, "il": {}, "ie": {}}
+    canonical: dict[tuple[str, str], int] = {}
+    kept: list[dict[str, object]] = []
+    for line in document.lines:
+        line = copy.deepcopy(line)
+        _rewrite_references(line, merged["ie"], merged["in"], merged["il"], strict=False)
+        declared = declares_table_id(line)
+        if declared is not None:
+            table, identifier = declared
+            key = (table, json.dumps({k: v for k, v in line.items() if k != table}, sort_keys=True))
+            if key in canonical:
+                merged[table][identifier] = canonical[key]
+                continue
+            canonical[key] = identifier
+        kept.append(line)
+    try:
+        rewritten = _renumber(kept)
+    except ValueError:
+        return None
+    return None if rewritten is None else Document(tuple(rewritten))
 
 
 def renumber(document: Document) -> Document | None:

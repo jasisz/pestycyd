@@ -21,6 +21,7 @@ from .rewrite import (
     declares_table_id,
     expression_reference_sites,
     is_declaration,
+    share,
 )
 
 
@@ -1112,6 +1113,15 @@ def append_large_elimination(document: Document, variant: str) -> Document:
     return Document(tuple(lines))
 
 
+def _shared(document: Document) -> Document:
+    """Merge the records an appender re-interned (``bvar 0``, ``Sort 0``, ...).
+
+    Nanoda-family checkers refuse a repeated record before checking
+    anything, which would mask the one fault the appended block carries.
+    """
+    return share(document) or document
+
+
 def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
     lines = [copy.deepcopy(line) for line in document.lines]
     if not 0 <= rewrite.line < len(lines):
@@ -1134,17 +1144,17 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
     if kind == "theorem-of-type":
         return theorem_of_type(Document(tuple(lines)), rewrite.line)
     if kind == "append-large-elimination":
-        return append_large_elimination(Document(tuple(lines)), str(rewrite.params[0]))
+        return _shared(append_large_elimination(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "extra-recursor":
         return extra_recursor(Document(tuple(lines)), rewrite.line)
     if kind == "append-field-inductive":
-        return append_field_inductive(Document(tuple(lines)), str(rewrite.params[0]))
+        return _shared(append_field_inductive(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "append-undeclared-universe":
-        return append_undeclared_universe(Document(tuple(lines)))
+        return _shared(append_undeclared_universe(Document(tuple(lines))))
     if kind == "append-undeclared-inductive":
-        return append_undeclared_inductive(Document(tuple(lines)), str(rewrite.params[0]))
+        return _shared(append_undeclared_inductive(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "append-prop-impostor":
-        return append_prop_impostor(Document(tuple(lines)), str(rewrite.params[0]))
+        return _shared(append_prop_impostor(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "disguise-prop-sort":
         field, variant = rewrite.params
         return disguise_prop_sort(
