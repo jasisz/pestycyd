@@ -1114,10 +1114,12 @@ def append_large_elimination(document: Document, variant: str) -> Document:
 
 
 def _shared(document: Document) -> Document:
-    """Merge the records an appender re-interned (``bvar 0``, ``Sort 0``, ...).
+    """Merge the records a rewrite re-interned (``bvar 0``, ``Sort 0``, ...).
 
     Nanoda-family checkers refuse a repeated record before checking
-    anything, which would mask the one fault the appended block carries.
+    anything, which would mask the fault (or, for a metamorphic wrap, the
+    acceptance) under test.  ``clone-value-dag`` is the exception: its
+    duplicates are the point.
     """
     return share(document) or document
 
@@ -1128,11 +1130,11 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         raise ValueError("rewrite lies outside the document")
     kind = rewrite.kind
     if kind == "wrap-beta":
-        return wrap_beta(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
+        return _shared(wrap_beta(Document(tuple(lines)), rewrite.line, tuple(rewrite.path)))
     if kind == "wrap-eta":
-        return wrap_eta(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
+        return _shared(wrap_eta(Document(tuple(lines)), rewrite.line, tuple(rewrite.path)))
     if kind == "wrap-let":
-        return wrap_let(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
+        return _shared(wrap_let(Document(tuple(lines)), rewrite.line, tuple(rewrite.path)))
     if kind == "rename-declaration":
         return rename_declaration(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "clone-value-dag":

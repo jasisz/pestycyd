@@ -409,6 +409,9 @@ TRUSTED_PRELUDE = frozenset(
         "Nat.shiftRight", "Nat.pow", "Nat.log2", "Nat.pred",
         "String", "String.mk", "String.ofList", "Char", "Char.ofNat", "List", "Bool",
         "Eq", "Quot", "Quot.mk", "Quot.lift", "Quot.ind",
+        # Binder annotations the kernel strips by name when it generates
+        # recursors; kefir declines a block whose outParam is not the identity.
+        "outParam", "optParam", "autoParam",
     }
 )
 

@@ -46,7 +46,12 @@ pool for corpus seeds and known-bad cases.
   re-emit `bvar:0`). Also `tc.rs def_eq` assertion panics. Robustness class.
   `tolerate = ["crash"]` on `[kernels.nanoda]` suppresses it in hunts
   (per-kernel tolerated severe statuses, `KernelSpec.tolerate`); its
-  accept/reject verdicts still count for differentials.
+  accept/reject verdicts still count for differentials. But a tolerated
+  crash is a *lost* verdict: every wrap-beta/let/eta output used to crash
+  nanoda, so metamorphic hunts never tested it. Appending and wrapping
+  rewrites now go through `rewrite.share` (one record per structure, as
+  lean4export emits); run `share` over any hand-assembled seed too —
+  sokonanoda refuses repeated names (`duplicate Name`) the same way.
 - con-leche/con-ron **derive recursor rules and ignore serialized
   `rules[].rhs`** entirely (probe: `rhs` pointing at `Sort` still accepts).
   Any mutation confined to serialized rec-rule payload fields yields
