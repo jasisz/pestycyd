@@ -52,6 +52,11 @@ pool for corpus seeds and known-bad cases.
   Any mutation confined to serialized rec-rule payload fields yields
   `con-*=accept` vs `reject` elsewhere — expected conformance divergence,
   not a bug (same family as the withdrawn prop-recursor report).
+- sokonanoda likewise **installs only the recursors it derives** and drops
+  serialized extras: `extra-recursor` copies (and Arena's `rogue`) are
+  accepted at the block but absent from the environment (`unknown const
+  ….pestycydCopy` on use). Its lone `accept` on `extra-recursor` is
+  conformance divergence, not a hole.
 - pestka and lean4lean both resolve re-bound intern ids first-binding-wins
   (`intern-table-shadowing`); con-* decline them, nanoda panics.
 - `leanchecker --from-export` is the reference oracle: Pestka has exact
