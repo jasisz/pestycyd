@@ -22,6 +22,7 @@ from .rewrite import (
     expression_reference_sites,
     is_declaration,
     share,
+    share_appended,
 )
 
 
@@ -716,7 +717,7 @@ def append_prop_impostor(document: Document, variant: str, with_theorem: bool = 
     a closed proof of ``False``.  Without the theorem the document is valid,
     which separates an impostor bug from incomplete level normalization.
     """
-    lines = [copy.deepcopy(line) for line in document.lines]
+    lines = list(document.lines)
     declared = _declared_name_ids(lines)
     if not {"Nat", "Eq", "Eq.refl"} <= declared.keys():
         raise ValueError("prop impostor needs Nat, Eq and Eq.refl")
@@ -887,7 +888,7 @@ def append_safety_fault(document: Document, fault: str, control: bool = False) -
     """
     if fault not in SAFETY_FAULTS:
         raise ValueError(f"unknown safety fault: {fault}")
-    lines = [copy.deepcopy(line) for line in document.lines]
+    lines = list(document.lines)
     out = _Appender(lines)
     k_name = out.name("pestycydRestricted")
     use_name = out.name("pestycydUse")
@@ -934,7 +935,7 @@ def append_index_elimination(document: Document, control: bool = False) -> Docum
     ``use := fun a t => Q.rec (fun _ _ => Type) (fun _ => Prop) t`` needs
     the forged large one.
     """
-    lines = [copy.deepcopy(line) for line in document.lines]
+    lines = list(document.lines)
     out = _Appender(lines)
     q_name = out.name("PestycydIndexed")
     mk_name = out.add("in", str={"pre": q_name, "str": "mk"})
@@ -996,7 +997,7 @@ def append_literal_equation(document: Document, op: str, args: tuple[int, ...], 
     for ``beq``/``ble``); the expected value comes from Python's integers,
     an oracle independent of every checker.
     """
-    lines = [copy.deepcopy(line) for line in document.lines]
+    lines = list(document.lines)
     names = _declared_names(lines)
     out = _Appender(lines)
     one = out.add("il", succ=0)
@@ -1023,7 +1024,7 @@ def append_undeclared_universe(document: Document) -> Document:
     ``k``'s type ignores its universe, so ``k.{u}`` has type ``Type`` for
     any ``u``: the only fault is that ``bad`` binds no ``u``.
     """
-    lines = [copy.deepcopy(line) for line in document.lines]
+    lines = list(document.lines)
     out = _Appender(lines)
     k_name = out.name("pestycydUniverseFree")
     bad_name = out.name("pestycydUndeclaredUniverse")
@@ -1083,7 +1084,7 @@ def append_field_inductive(document: Document, fault: str) -> Document:
     """
     if fault not in FIELD_FAULTS:
         raise ValueError(f"unknown field fault: {fault}")
-    lines = [copy.deepcopy(line) for line in document.lines]
+    lines = list(document.lines)
     out = _Appender(lines)
     stem = {"non-positive": "Neg", "field-too-large": "Big", "control": "Ok"}[fault]
     i_name = out.name(f"Pestycyd{stem}")
@@ -1136,7 +1137,7 @@ def append_undeclared_inductive(document: Document, site: str, declared: bool = 
     """
     if site not in UNDECLARED_INDUCTIVE_SITES:
         raise ValueError(f"unknown undeclared-universe site: {site}")
-    lines = [copy.deepcopy(line) for line in document.lines]
+    lines = list(document.lines)
     out = _Appender(lines)
     i_name = out.name("PestycydUnbound" + ("Type" if site == "type" else "Ctor"))
     mk_name = out.add("in", str={"pre": i_name, "str": "mk"})
@@ -1199,7 +1200,7 @@ def append_large_elimination(document: Document, variant: str) -> Document:
     """
     if variant not in LARGE_ELIMINATION:
         raise ValueError(f"unknown large-elimination variant: {variant}")
-    lines = [copy.deepcopy(line) for line in document.lines]
+    lines = list(document.lines)
     out = _Appender(lines)
     stem = {"two-ctors": "Either", "data-field": "Holds", "control": "Unit"}[variant]
     p_name = out.name(f"Pestycyd{stem}")
@@ -1278,11 +1279,37 @@ def _shared(document: Document) -> Document:
     return share(document) or document
 
 
+def _appended(base: Document, document: Document) -> Document:
+    """``_shared`` for a rewrite that only appends records to ``base``."""
+    return share_appended(base, document) or document
+
+
 def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
-    lines = [copy.deepcopy(line) for line in document.lines]
-    if not 0 <= rewrite.line < len(lines):
+    if not 0 <= rewrite.line < len(document.lines):
         raise ValueError("rewrite lies outside the document")
     kind = rewrite.kind
+    # Appending rewrites copy what they touch and leave the base lines
+    # alone, so they skip the defensive deep copy below.
+    if kind == "append-large-elimination":
+        return _appended(document, append_large_elimination(document, str(rewrite.params[0])))
+    if kind == "append-field-inductive":
+        return _appended(document, append_field_inductive(document, str(rewrite.params[0])))
+    if kind == "append-undeclared-universe":
+        return _appended(document, append_undeclared_universe(document))
+    if kind == "append-undeclared-inductive":
+        return _appended(document, append_undeclared_inductive(document, str(rewrite.params[0])))
+    if kind == "append-safety-fault":
+        return _appended(document, append_safety_fault(document, str(rewrite.params[0])))
+    if kind == "append-index-elimination":
+        return _appended(document, append_index_elimination(document))
+    if kind == "append-literal-equation":
+        op, args, rhs = rewrite.params
+        expected: int | bool = rhs if isinstance(rhs, bool) else int(str(rhs))
+        return _appended(document, append_literal_equation(
+            document, str(op), tuple(int(str(a)) for a in args), expected))  # type: ignore[union-attr]
+    if kind == "append-prop-impostor":
+        return _appended(document, append_prop_impostor(document, str(rewrite.params[0])))
+    lines = [copy.deepcopy(line) for line in document.lines]
     if kind == "wrap-beta":
         return _shared(wrap_beta(Document(tuple(lines)), rewrite.line, tuple(rewrite.path)))
     if kind == "wrap-eta":
@@ -1299,27 +1326,8 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return let_ill_typed(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "theorem-of-type":
         return theorem_of_type(Document(tuple(lines)), rewrite.line)
-    if kind == "append-large-elimination":
-        return _shared(append_large_elimination(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "extra-recursor":
         return extra_recursor(Document(tuple(lines)), rewrite.line)
-    if kind == "append-field-inductive":
-        return _shared(append_field_inductive(Document(tuple(lines)), str(rewrite.params[0])))
-    if kind == "append-undeclared-universe":
-        return _shared(append_undeclared_universe(Document(tuple(lines))))
-    if kind == "append-undeclared-inductive":
-        return _shared(append_undeclared_inductive(Document(tuple(lines)), str(rewrite.params[0])))
-    if kind == "append-safety-fault":
-        return _shared(append_safety_fault(Document(tuple(lines)), str(rewrite.params[0])))
-    if kind == "append-index-elimination":
-        return _shared(append_index_elimination(Document(tuple(lines))))
-    if kind == "append-literal-equation":
-        op, args, rhs = rewrite.params
-        expected: int | bool = rhs if isinstance(rhs, bool) else int(str(rhs))
-        return _shared(append_literal_equation(
-            Document(tuple(lines)), str(op), tuple(int(str(a)) for a in args), expected))  # type: ignore[union-attr]
-    if kind == "append-prop-impostor":
-        return _shared(append_prop_impostor(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "disguise-prop-sort":
         field, variant = rewrite.params
         return disguise_prop_sort(

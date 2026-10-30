@@ -12,6 +12,7 @@ from pestycyd.rewrite import (
     prelude_lines,
     renumber,
     share,
+    share_appended,
 )
 
 
@@ -58,6 +59,40 @@ class ShareTests(unittest.TestCase):
     def test_duplicate_table_identifiers_are_left_alone(self) -> None:
         document = Document((META, {"ie": 0, "sort": 0}, {"ie": 0, "bvar": 0}))
         self.assertIsNone(share(document))
+
+    def test_appended_tail_merges_into_base_and_matches_full_share(self) -> None:
+        base = Document(
+            (
+                META,
+                {"in": 1, "str": {"pre": 0, "str": "x"}},
+                {"ie": 0, "sort": 0},
+                {"ie": 1, "bvar": 0},
+                {"ie": 2, "lam": {"binderInfo": "default", "name": 1, "type": 0, "body": 1}},
+            )
+        )
+        appended = Document(
+            (
+                *base.lines,
+                {"in": 2, "str": {"pre": 0, "str": "a"}},
+                {"ie": 3, "bvar": 0},
+                {"ie": 4, "lam": {"binderInfo": "default", "name": 1, "type": 0, "body": 3}},
+                {"ie": 5, "forallE": {"binderInfo": "default", "name": 1, "type": 0, "body": 0}},
+                def_line(2, 5, 4),
+            )
+        )
+        shared = share_appended(base, appended)
+        expected = share(appended)
+        assert shared is not None and expected is not None
+        self.assertEqual(shared.render(), expected.render())
+        self.assertEqual(shared.lines[-1]["def"]["value"], 2)
+        self.assertIs(shared.lines[1], base.lines[1])
+
+    def test_appended_falls_back_when_base_is_not_shared(self) -> None:
+        base = Document((META, {"ie": 0, "sort": 0}, {"ie": 1, "sort": 0}))
+        appended = Document((*base.lines, {"ie": 2, "sort": 0}))
+        shared = share_appended(base, appended)
+        assert shared is not None
+        self.assertEqual(len(shared.lines), 2)
 
 
 class CanonicalizeTests(unittest.TestCase):

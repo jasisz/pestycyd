@@ -538,6 +538,81 @@ def share(document: Document) -> Document | None:
     return None if rewritten is None else Document(tuple(rewritten))
 
 
+def _share_key(table: str, line: dict[str, object]) -> tuple[str, str]:
+    return table, json.dumps({k: v for k, v in line.items() if k != table}, sort_keys=True)
+
+
+# Share indexes of recent bases, keyed by identity; the base is kept alive
+# beside its index so the identity cannot be reused while cached.
+_SHARE_INDEXES: dict[int, tuple[Document, tuple[dict[tuple[str, str], int], dict[str, int]] | None]] = {}
+
+
+def _share_index(base: Document) -> tuple[dict[tuple[str, str], int], dict[str, int]] | None:
+    """Structure keys and next free ids of an already-shared base, or ``None``."""
+    cached = _SHARE_INDEXES.get(id(base))
+    if cached is not None and cached[0] is base:
+        return cached[1]
+    canonical: dict[tuple[str, str], int] = {}
+    seen: set[tuple[str, int]] = set()
+    next_ids = {"in": 1, "il": 1, "ie": 0}
+    index: tuple[dict[tuple[str, str], int], dict[str, int]] | None = (canonical, next_ids)
+    for line in base.lines:
+        if FRESH in line:
+            index = None
+            break
+        declared = declares_table_id(line)
+        if declared is None:
+            continue
+        table, identifier = declared
+        key = _share_key(table, line)
+        if declared in seen or key in canonical:
+            index = None
+            break
+        seen.add(declared)
+        canonical[key] = identifier
+        next_ids[table] = max(next_ids[table], identifier + 1)
+    if len(_SHARE_INDEXES) >= 8:
+        _SHARE_INDEXES.clear()
+    _SHARE_INDEXES[id(base)] = (base, index)
+    return index
+
+
+def share_appended(base: Document, document: Document) -> Document | None:
+    """``share`` for a document that extends ``base`` by appended records.
+
+    When ``base`` is itself shared, only the appended tail can repeat a
+    record, so the tail is merged against a cached index of the base and
+    renumbered past it; the base lines are reused untouched.  That keeps
+    appending campaigns from re-hashing a large seed on every mutation.
+    Falls back to ``share`` whenever that premise does not hold.
+    """
+    start = len(base.lines)
+    index = _share_index(base)
+    if index is None or len(document.lines) < start or document.lines[:start] != base.lines:
+        return share(document)
+    canonical, next_ids = dict(index[0]), dict(index[1])
+    merged: dict[str, dict[int, int]] = {"in": {}, "il": {}, "ie": {}}
+    tail: list[dict[str, object]] = []
+    for line in document.lines[start:]:
+        if FRESH in line:
+            return share(document)
+        line = copy.deepcopy(line)
+        _rewrite_references(line, merged["ie"], merged["in"], merged["il"], strict=False)
+        declared = declares_table_id(line)
+        if declared is not None:
+            table, identifier = declared
+            if identifier < index[1][table]:
+                return share(document)
+            key = _share_key(table, line)
+            if key in canonical:
+                merged[table][identifier] = canonical[key]
+                continue
+            merged[table][identifier] = canonical[key] = line[table] = next_ids[table]  # type: ignore[assignment]
+            next_ids[table] += 1
+        tail.append(line)
+    return Document((*base.lines, *tail))
+
+
 def renumber(document: Document) -> Document | None:
     """Renumber tables densely without dropping any records."""
     try:
