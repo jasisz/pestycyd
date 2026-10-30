@@ -209,7 +209,21 @@ class Document:
                 changed[edit.line] = copy.deepcopy(edit.value)
             else:  # pragma: no cover - Literal keeps callers honest
                 raise ValueError(f"unknown line edit: {edit.kind}")
-        return Document(tuple(changed))
+        result = Document(tuple(changed))
+        if mutation.campaign in DUPLICATING_CAMPAIGNS:
+            return result
+        # An edit can make a record equal to another (``succ 2`` turned into
+        # an existing ``succ 0``).  Nanoda-family checkers refuse a repeated
+        # record outright, hiding their verdict on the edit itself.
+        from .rewrite import share
+
+        return share(result) or result
+
+
+# Campaigns whose mutations are meant to repeat a record or a declaration.
+DUPLICATING_CAMPAIGNS = frozenset(
+    {"intern-table-shadowing", "expression-unsharing", "declaration-replay", "declaration-shadow-copy"}
+)
 
 
 def files(paths: list[str]) -> list[Path]:
