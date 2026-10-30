@@ -91,3 +91,8 @@ pool for corpus seeds and known-bad cases.
   nanoda derives `all`-as-set and misses the `recs[].all` order check.
 - `findings` prints a `campaign × status-vector` signature rollup — use it
   to triage large stores before reading individual cases.
+- `src/pestycyd/triage.toml` is the machine-readable form of the lessons
+  above: once a divergence class is understood, add a narrow rule (prefer
+  `sites`/`output`/`reference` over kernel names) so hunts stop surfacing
+  it. Check a new rule against the archive (`.pestycyd/*/findings`) — it
+  should explain the class and nothing else.

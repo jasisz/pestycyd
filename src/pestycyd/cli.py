@@ -26,6 +26,7 @@ from .outcomes import Outcome
 from .rewrite import canonical_false_theorem, canonicalize, prelude_lines, renumber
 from .runner import run_matrix, run_probe
 from .store import FindingStore, atomic_text
+from .triage import load_triage, mutation_sites, triage, triage_metadata
 
 
 def matrix_json(results: dict[str, Outcome]) -> dict[str, object]:
@@ -277,6 +278,7 @@ class FindingHit:
     statuses: dict[str, str]
     canonical_digest: str | None
     canonical_false: bool
+    known_classes: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass
@@ -292,6 +294,10 @@ class HuntSummary:
     @property
     def novel_findings(self) -> int:
         return sum(1 for finding in self.findings if finding.novel)
+
+    @property
+    def untriaged(self) -> int:
+        return sum(1 for finding in self.findings if not finding.known_classes)
 
 
 def operator(mutation: Mutation) -> tuple[str, str]:
@@ -352,6 +358,7 @@ def run_hunt(
 
     paths = files(params.paths)
     campaigns = selected_campaigns(params.campaigns)
+    rules = load_triage(config.triage)
     finding_expect = dict(params.finding_expect)
     unknown = set(finding_expect).difference(kernel.name for kernel in kernels)
     if unknown:
@@ -549,6 +556,18 @@ def run_hunt(
             }
             if interesting:
                 findings += 1
+                mutation_json = mutation.json()
+                sites = mutation_sites(child.lines, mutation_json)
+                verdict = triage(
+                    rules,
+                    mutation.campaign,
+                    mutation.label,
+                    mutation.oracle,
+                    metadata["results"],  # type: ignore[arg-type]
+                    sites,
+                )
+                metadata["sites"] = sorted(sites)
+                metadata["triage"] = verdict.json()
                 digest, created = store.save(content, metadata)
                 novel += created
                 canonical = canonicalize(child)
@@ -572,11 +591,13 @@ def run_hunt(
                             if canonical is not None
                             else canonical_false_theorem(child)
                         ),
+                        known_classes=verdict.rule_ids if verdict.known else (),
                     )
                 )
+                classes = f" [known: {', '.join(verdict.rule_ids)}]" if verdict.known else ""
                 say(
                     f"{'FINDING' if created else 'KNOWN'} {digest[:12]} {mutation.label}: "
-                    f"{statuses(results)}"
+                    f"{statuses(results)}{classes}"
                 )
                 if params.stop_on is not None and params.stop_on(hits[-1].statuses):
                     break
@@ -651,13 +672,15 @@ def hunt(config: Config, kernels: tuple[KernelSpec, ...], args: argparse.Namespa
     )
     summary = run_hunt(config, kernels, params, args.state or config.state, print)
     print(
-        f"hunt: {summary.attempts} mutations, {len(summary.findings)} interesting, "
+        f"hunt: {summary.attempts} mutations, {len(summary.findings)} interesting "
+        f"({summary.untriaged} untriaged), "
         f"{summary.novel_findings} novel findings, {summary.coverage_inputs} coverage inputs, "
         f"{summary.feedback_features} feedback features"
     )
     if summary.no_seeds:
         return 2
-    return 1 if summary.findings else 0
+    # Findings that triage.toml fully explains are expected divergence.
+    return 1 if summary.untriaged else 0
 
 
 def parse_expect(value: str) -> tuple[str, str]:
@@ -903,6 +926,7 @@ def findings_command(config: Config, _kernels: tuple[KernelSpec, ...], args: arg
     if not cases:
         print(f"findings: none stored under {findings_dir}")
         return 0
+    rules = load_triage(config.triage)
     clusters: dict[str, list[dict[str, object]]] = {}
     for case in cases:
         sidecar = case.with_suffix(".json")
@@ -931,11 +955,29 @@ def findings_command(config: Config, _kernels: tuple[KernelSpec, ...], args: arg
                 key = canonical.render()
                 key = f"canonical:{hashlib.sha256(key.encode()).hexdigest()}"
             entry["canonical_false"] = canonical_false_theorem(document)
+            verdict = triage_metadata(rules, metadata, document.lines)
+            if verdict is not None and verdict.known:
+                entry["known"] = list(verdict.rule_ids)
+            elif verdict is not None:
+                entry["unexplained"] = list(verdict.unexplained)
         entry["sidecar"] = metadata
         clusters.setdefault(key, []).append(entry)
 
     ordered = sorted(clusters.items(), key=lambda item: (-len(item[1]), item[0]))
-    print(f"findings: {len(cases)} inputs collapse into {len(ordered)} cluster(s)")
+    known_classes: dict[tuple[str, ...], int] = {}
+    for _, entries in ordered:
+        known = entries[0].get("known")
+        if known:
+            known_classes[tuple(known)] = known_classes.get(tuple(known), 0) + len(entries)
+    untriaged = sum(len(entries) for _, entries in ordered if not entries[0].get("known"))
+    print(
+        f"findings: {len(cases)} inputs collapse into {len(ordered)} cluster(s); "
+        f"{untriaged} input(s) untriaged"
+    )
+    if known_classes:
+        print("known classes (triage.toml; --all lists their clusters):")
+        for ids, count in sorted(known_classes.items(), key=lambda item: -item[1]):
+            print(f"  {count:5d} × {' + '.join(ids)}")
     report: dict[str, object] = {"schema": "pestycyd-findings-1", "clusters": []}
     for key, entries in ordered:
         first = entries[0]
@@ -956,13 +998,21 @@ def findings_command(config: Config, _kernels: tuple[KernelSpec, ...], args: arg
             "statuses": statuses,
             "campaign": campaign,
             "canonical_false": bool(first.get("canonical_false")),
+            "known": first.get("known", []),
+            "unexplained": first.get("unexplained", []),
         }
         report["clusters"].append(row)
+        if row["known"] and not args.all:
+            continue
         flags = []
         if row["canonical_false"]:
             flags.append("∀P:Prop,P")
         if key.startswith("noncanonical:"):
             flags.append("noncanonical")
+        if row["unexplained"]:
+            flags.append(f"unexplained: {', '.join(row['unexplained'])}")
+        if row["known"]:
+            flags.append(f"known: {', '.join(row['known'])}")
         suffix = f" [{', '.join(flags)}]" if flags else ""
         print(
             f"  {len(entries):4d} × {key[-12:]}{suffix} "
@@ -970,6 +1020,8 @@ def findings_command(config: Config, _kernels: tuple[KernelSpec, ...], args: arg
         )
     signatures: dict[tuple[object, tuple[tuple[str, object], ...]], int] = {}
     for row in report["clusters"]:
+        if row["known"] and not args.all:
+            continue
         signature = (row["campaign"], tuple(sorted(row["statuses"].items())))
         signatures[signature] = signatures.get(signature, 0) + int(row["findings"])
     sig_rows = sorted(signatures.items(), key=lambda item: -item[1])
@@ -1199,6 +1251,9 @@ def parser() -> argparse.ArgumentParser:
     )
     command.add_argument("--report", type=Path)
     command.add_argument("--state", type=Path)
+    command.add_argument(
+        "--all", action="store_true", help="also list clusters that triage.toml explains"
+    )
     command.set_defaults(function=findings_command)
     return root
 

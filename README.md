@@ -311,6 +311,44 @@ definition unfolding) is either that binder shape or a constant of an
 inductive with zero constructors in `Prop`, in an axiom-free, safe-fragment
 document. The check is immune to name shadowing by construction.
 
+## Triage of known divergences
+
+Most disagreements between checkers are long understood: a checker derives a
+field instead of reading it, runs out of a declared budget, rejects by
+panicking, or declines a feature by design. `src/pestycyd/triage.toml` records
+those classes as rules, each with the reason it is not a bug:
+
+```toml
+[[rule]]
+id = "con-derived-recursor-rules"
+why = "con-* derive recursor rules and ignore serialized rules[]"
+kernels = ["con-*"]                          # fnmatch on kernel names
+status = ["accept"]
+expected = ["reject"]                        # optional
+sites = ["inductive.recs.rules*"]            # optional
+output = "regex on the checker's output"     # optional
+reference = "regex on official's output"     # optional
+campaigns = ["..."]                          # optional, fnmatch
+labels = ["..."]                             # optional, fnmatch
+```
+
+Every finding gets an expected verdict: the oracle's, else official's, else
+the plurality's. A checker *deviates* when its status differs, and a rule
+*explains* it when all given fields match. `sites` names where the mutation
+lands: the declaration field it edits, or for an edited table record every
+declaration field that reaches it. "Only a recursor rule changed" thus differs
+from "a definition changed". A finding is *known* when every deviation is
+explained, so several known classes may combine on one input.
+
+Hunts tag known findings `[known: …]`, store the triage in the sidecar, and
+exit non-zero only for untriaged findings. `findings` lists untriaged clusters
+and the deviating checkers that no rule explains, and rolls the rest up by
+class (`--all` lists them too). On the project's own archive of about 3000
+findings the built-in rules explain 95%; the rest are the cases worth a human.
+Add project-specific rules with `triage = ["my-triage.toml"]` under
+`[defaults]`; those files are tried before the built-in ones. Keep a rule
+narrow (`sites`, `output`, `reference`), because a broad one hides bugs.
+
 ## Per-declaration verdicts
 
 Kernels answer once per document, so a disagreement says *that* checkers

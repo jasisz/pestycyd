@@ -83,6 +83,7 @@ class Config:
     state: Path
     kernels: tuple[KernelSpec, ...]
     hunt_lenient: tuple[tuple[str, ...], ...] = ()
+    triage: tuple[Path, ...] = ()
 
     def selected(self, names: list[str] | None) -> tuple[KernelSpec, ...]:
         if not names:
@@ -116,6 +117,11 @@ def load_config(path: Path) -> Config:
     if not isinstance(state_value, str):
         raise ValueError("defaults.state must be a string")
     state = (base / state_value).resolve()
+    triage_value = defaults.get("triage", [])
+    if isinstance(triage_value, str):
+        triage_value = [triage_value]
+    if not isinstance(triage_value, list) or not all(isinstance(item, str) for item in triage_value):
+        raise ValueError("defaults.triage must be a path or an array of paths")
     kernel_tables = raw.get("kernels")
     if not isinstance(kernel_tables, dict) or not kernel_tables:
         raise ValueError("configuration needs at least one [kernels.NAME] table")
@@ -236,6 +242,7 @@ def load_config(path: Path) -> Config:
         state=state,
         kernels=tuple(kernels),
         hunt_lenient=tuple(tuple(group) for group in lenient_value),
+        triage=tuple((base / item).resolve() for item in triage_value),
     )
 
 

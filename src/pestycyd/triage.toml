@@ -1,0 +1,176 @@
+# Known divergences between checkers: hunts and `pestycyd findings` label a
+# finding as known when one of these rules explains every checker that
+# deviates from the expected verdict (see src/pestycyd/triage.py).  Rules
+# are tried in order; the first that explains a checker wins.
+#
+# Add a rule only for a class you have understood — a derived field, a
+# budget, a feature declined by design — and say why in `why`.  A rule that
+# is too broad hides bugs: prefer `sites`, `output` and `reference` that
+# pin the mechanism down over kernel names alone.
+
+# --- Lost verdicts: the checker never judged the input. --------------------
+
+[[rule]]
+id = "duplicate-record-refusal"
+why = """nanoda-family parsers refuse a structurally repeated name, level or
+expression record before checking anything. A lost verdict, not a judgement;
+generated inputs go through rewrite.share to avoid it."""
+kernels = ["nanoda*", "nanoclo*", "nanobruijn*", "sokonanoda*"]
+status = ["crash", "reject", "decline"]
+output = "Attempted to insert duplicate (Name|Level|Expr)"
+
+[[rule]]
+id = "sokonanoda-extensions-off"
+why = """sokonanoda declines every export with a Nat or String literal unless
+run with --nat-extension --string-extension: a configuration gap."""
+kernels = ["sokonanoda*"]
+status = ["decline"]
+output = "extension disallowed by checker execution config"
+
+[[rule]]
+id = "kefir-resource-budget"
+why = """kefir declines when its declared reduction or memory budget runs out
+(e.g. Nat.gcd on 2^64-sized literals, which it unfolds instead of computing
+natively). An honest 'cannot decide', never a wrong verdict."""
+kernels = ["kefir*"]
+status = ["decline"]
+output = '"code":"resource\.'
+
+[[rule]]
+id = "kefir-unsupported"
+why = "kefir declines inputs outside its supported fragment (support.*)."
+kernels = ["kefir*"]
+status = ["decline"]
+output = '"code":"support\.'
+
+[[rule]]
+id = "con-unsupported-nat-spelling"
+why = """con-* recognise Nat.div/Nat.mod only in the exact spellings of pinned
+Lean releases; a renamed or rewritten prelude is declined."""
+kernels = ["con-*"]
+status = ["decline"]
+output = 'unsupported Nat\.div/mod spelling'
+
+[[rule]]
+id = "con-unsupported-inductive-shape"
+why = "con-* decline inductive blocks whose shape they do not recognise."
+kernels = ["con-*"]
+status = ["decline"]
+output = "shape not recognised"
+
+[[rule]]
+id = "unsupported-mdata"
+why = """con-leche and nanoda do not parse Expr.mdata records (con-leche:
+'unknown key', nanoda: 'Expr.mdata not supported')."""
+kernels = ["con-*", "nanoda*", "nanoclo*", "nanobruijn*"]
+status = ["decline", "reject", "crash"]
+output = "unknown key|Expr\\.mdata not supported"
+
+# --- Rejections by another route. ----------------------------------------
+
+[[rule]]
+id = "nanoda-panic-rejection"
+why = """nanoda-family checkers reject ill-typed input by panicking on an
+internal assertion; with an invalid input that is a rejection, not a crash."""
+kernels = ["nanoda*", "nanoclo*", "nanobruijn*"]
+status = ["crash", "reject"]
+expected = ["reject"]
+output = "panicked at"
+
+# --- Checkers that derive what the export serializes. ---------------------
+
+[[rule]]
+id = "sokonanoda-derived-recursors"
+why = """sokonanoda installs only the recursors it derives from the block and
+rebuilds constructor metadata, types[].ctors and the block's all list from
+the type records, ignoring the serialized copies, so edits confined to them
+do not reach it (AGENTS.md)."""
+kernels = ["sokonanoda*"]
+status = ["accept"]
+expected = ["reject"]
+sites = [
+    "inductive.recs.*",
+    "inductive.types.ctors",
+    "inductive.types.all",
+    "inductive.ctors.levelParams",
+    "inductive.ctors.cidx",
+    "inductive.ctors.numFields",
+    "inductive.ctors.numParams",
+    "inductive.ctors.induct",
+]
+
+[[rule]]
+id = "sokonanoda-rederived-recursor"
+why = """The reference rejects only the serialized recursor, which no longer
+matches the (still valid) block; sokonanoda derives its own and accepts."""
+kernels = ["sokonanoda*"]
+status = ["accept"]
+expected = ["reject"]
+reference = "Invalid recursor"
+
+[[rule]]
+id = "sokonanoda-extra-recursor"
+why = """An extra serialized recursor is dropped by sokonanoda, never
+installed (absent from its environment), so the block itself checks."""
+kernels = ["sokonanoda*"]
+status = ["accept"]
+expected = ["reject"]
+labels = ["extra-recursor"]
+
+[[rule]]
+id = "con-derived-recursor-rules"
+why = """con-leche/con-ron derive recursor rules and ignore serialized
+rules[] entirely (a rhs pointing at Sort still accepts)."""
+kernels = ["con-*"]
+status = ["accept"]
+expected = ["reject"]
+sites = ["inductive.recs.rules*", "inductive.recs.all", "inductive.types.all"]
+
+[[rule]]
+id = "official-rederives-inductive-metadata"
+why = """The reference kernel re-derives types[].all, numNested, numIndices,
+numParams, isRec and isReflexive and accepts wrong serialized values; pestka,
+the nanoda family, tenet and kefir validate them (stricter than reference),
+nanoda additionally refuses values beyond u16 at parse time (AGENTS.md)."""
+kernels = ["pestka*", "nanoda*", "nanoclo*", "nanobruijn*", "tenet*", "kefir*"]
+status = ["reject", "crash"]
+expected = ["accept"]
+sites = [
+    "inductive.types.all",
+    "inductive.types.numNested",
+    "inductive.types.numIndices",
+    "inductive.types.numParams",
+    "inductive.types.isRec",
+    "inductive.types.isReflexive",
+]
+
+[[rule]]
+id = "lean4lean-prelude-primitives"
+why = """lean4lean validates the bodies of Nat primitives through Init helpers
+it looks up by name (ite, HMod.hMod, rfl, ...); renaming or rewriting them,
+which the reference accepts, makes it reject. Hunt with --protect-prelude."""
+kernels = ["lean4lean*"]
+status = ["reject"]
+expected = ["accept"]
+output = "invalid form for primitive def|at Nat\\.[A-Za-z0-9]+: \\(kernel\\) unknown constant"
+
+[[rule]]
+id = "nanoclo-lambda-domain-blind"
+why = """nanoclo's NbE conversion ignores lambda binder domains, so a recursor
+rule differing from the derived one only in lambda annotations passes. Inert:
+the lambdas vanish under iota (AGENTS.md)."""
+kernels = ["nanoclo*"]
+status = ["accept"]
+expected = ["reject"]
+sites = ["inductive.recs.rules.rhs"]
+labels = ["lam-type-*", "lam-*-from-*"]
+reference = "Invalid recursor"
+
+[[rule]]
+id = "nanoda-79-undeclared-universe-inductive"
+why = """Reported as nanoda#79 (Arena tests/other/inductive-undeclared-universe):
+the nanoda family skips the bound-universe check on the inductive type itself."""
+kernels = ["nanoda*", "nanoclo*", "nanobruijn*"]
+status = ["accept"]
+expected = ["reject"]
+labels = ["undeclared-universe-inductive-type"]
