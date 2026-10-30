@@ -536,3 +536,22 @@ class TransformTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiteralArithTests(unittest.TestCase):
+    def test_python_oracle_matches_kernel_conventions(self) -> None:
+        from pestycyd.campaigns import LITERAL_OPS
+
+        self.assertEqual(LITERAL_OPS["Nat.sub"](2, 3), 0)
+        self.assertEqual(LITERAL_OPS["Nat.div"](7, 0), 0)
+        self.assertEqual(LITERAL_OPS["Nat.mod"](7, 0), 7)
+        self.assertEqual(LITERAL_OPS["Nat.gcd"](0, 0), 0)
+        self.assertEqual(LITERAL_OPS["Nat.pow"](0, 0), 1)
+        self.assertEqual(LITERAL_OPS["Nat.log2"](0), 0)
+        self.assertEqual(LITERAL_OPS["Nat.log2"](2**64), 64)
+        self.assertEqual(LITERAL_OPS["Nat.pred"](0), 0)
+
+    def test_needs_the_constants_it_mentions(self) -> None:
+        from pestycyd.campaigns import CAMPAIGNS
+
+        self.assertEqual(list(CAMPAIGNS["literal-arith"].generate(Document(({"meta": {}},)))), [])

@@ -981,6 +981,42 @@ def append_index_elimination(document: Document, control: bool = False) -> Docum
     return Document(tuple(lines))
 
 
+def _declared_names(lines: list[dict[str, object]]) -> dict[str, int]:
+    """Full names of every declared constant, mapped to their name ids."""
+    from .rewrite import _declared, _name_strings
+
+    strings = _name_strings(lines)
+    return {strings[name]: name for line in lines for name in _declared(line) if name in strings}
+
+
+def append_literal_equation(document: Document, op: str, args: tuple[int, ...], rhs: int | bool) -> Document:
+    """Append ``theorem : op args = rhs := Eq.refl (op args)`` over literals.
+
+    The kernel decides it by its native ``Nat`` extension (``Bool`` results
+    for ``beq``/``ble``); the expected value comes from Python's integers,
+    an oracle independent of every checker.
+    """
+    lines = [copy.deepcopy(line) for line in document.lines]
+    names = _declared_names(lines)
+    out = _Appender(lines)
+    one = out.add("il", succ=0)
+    carrier = names["Bool" if isinstance(rhs, bool) else "Nat"]
+    ty = out.add("ie", const={"name": carrier, "us": []})
+    lhs = out.add("ie", const={"name": names[op], "us": []})
+    for arg in args:
+        lhs = out.app(lhs, out.add("ie", natVal=str(arg)))
+    if isinstance(rhs, bool):
+        value = out.add("ie", const={"name": names["Bool.true" if rhs else "Bool.false"], "us": []})
+    else:
+        value = out.add("ie", natVal=str(rhs))
+    eq = out.app(out.app(out.add("ie", const={"name": names["Eq"], "us": [one]}), ty), lhs)
+    refl = out.app(out.app(out.add("ie", const={"name": names["Eq.refl"], "us": [one]}), ty), lhs)
+    theorem = out.name("pestycydLiteral")
+    lines.append({"thm": {"all": [theorem], "levelParams": [], "name": theorem,
+                          "type": out.app(eq, value), "value": refl}})
+    return Document(tuple(lines))
+
+
 def append_undeclared_universe(document: Document) -> Document:
     """Append ``def k.{v} : Type := Prop`` and ``def bad : Type := k.{u}``.
 
@@ -1277,6 +1313,11 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return _shared(append_safety_fault(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "append-index-elimination":
         return _shared(append_index_elimination(Document(tuple(lines))))
+    if kind == "append-literal-equation":
+        op, args, rhs = rewrite.params
+        expected: int | bool = rhs if isinstance(rhs, bool) else int(str(rhs))
+        return _shared(append_literal_equation(
+            Document(tuple(lines)), str(op), tuple(int(str(a)) for a in args), expected))  # type: ignore[union-attr]
     if kind == "append-prop-impostor":
         return _shared(append_prop_impostor(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "disguise-prop-sort":

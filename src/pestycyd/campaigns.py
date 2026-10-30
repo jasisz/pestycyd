@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from collections import deque
 from dataclasses import dataclass, replace
 from typing import Callable, Iterable
@@ -1770,6 +1771,62 @@ def single_fault(document: Document) -> Iterable[Mutation]:
         )
 
 
+# The Nat operations the kernel computes natively, with Python's meaning.
+LITERAL_OPS: dict[str, Callable[..., int | bool]] = {
+    "Nat.add": lambda a, b: a + b,
+    "Nat.sub": lambda a, b: max(a - b, 0),
+    "Nat.mul": lambda a, b: a * b,
+    "Nat.div": lambda a, b: a // b if b else 0,
+    "Nat.mod": lambda a, b: a % b if b else a,
+    "Nat.gcd": math.gcd,
+    "Nat.beq": lambda a, b: a == b,
+    "Nat.ble": lambda a, b: a <= b,
+    "Nat.land": lambda a, b: a & b,
+    "Nat.lor": lambda a, b: a | b,
+    "Nat.xor": lambda a, b: a ^ b,
+    "Nat.shiftLeft": lambda a, b: a << b,
+    "Nat.shiftRight": lambda a, b: a >> b,
+    "Nat.pow": lambda a, b: a**b,
+    "Nat.log2": lambda a: a.bit_length() - 1 if a else 0,
+    "Nat.pred": lambda a: max(a - 1, 0),
+}
+# Word, sign and limb boundaries of the implementations under test.
+LITERAL_EDGES = (0, 1, 2, 3, 7, 63, 64, 65, 2**32 - 1, 2**32, 2**63 - 1, 2**63, 2**64 - 1, 2**64, 2**64 + 1,
+                 2**128 + 3, 10**30 + 7)
+# Exponents and shift amounts stay small: past 2^24 Lean unfolds pow instead of computing it.
+LITERAL_SMALL = (0, 1, 2, 31, 32, 63, 64, 65, 128)
+
+
+def literal_arith(document: Document) -> Iterable[Mutation]:
+    """Equations between Nat literals, true and off by one, oracled by Python."""
+    strings = _name_strings(list(document.lines))
+    declared = {strings.get(name) for line in document.lines for name in _declared(line)}
+    if not {"Nat", "Eq", "Eq.refl", "Bool.true", "Bool.false"} <= declared:
+        return
+    last = len(document.lines) - 1
+    for op, fn in LITERAL_OPS.items():
+        if op not in declared:
+            continue
+        arity = fn.__code__.co_argcount if hasattr(fn, "__code__") else 2
+        if arity == 1:
+            cases: Iterable[tuple[int, ...]] = ((a,) for a in LITERAL_EDGES)
+        elif op in ("Nat.pow", "Nat.shiftLeft", "Nat.shiftRight"):
+            cases = ((a, b) for a in LITERAL_EDGES for b in LITERAL_SMALL if op != "Nat.pow" or a < 2**64 or b <= 2)
+        else:
+            cases = ((a, b) for a in LITERAL_EDGES for b in LITERAL_EDGES)
+        for args in cases:
+            truth = fn(*args)
+            wrong = (not truth) if isinstance(truth, bool) else truth + 1
+            for oracle, rhs in (("guaranteed-accept", truth), ("guaranteed-reject", wrong)):
+                shown = rhs if isinstance(rhs, bool) else str(rhs)
+                label = f"{op}-{'-'.join(str(a) for a in args)}-{'true' if oracle == 'guaranteed-accept' else 'false'}"
+                yield Mutation(
+                    "literal-arith", label, oracle, last, (), "literal", shown,
+                    "kernel Nat literal extension agrees with arbitrary-precision arithmetic",
+                    rewrite=Rewrite("append-literal-equation", last, (), (op, tuple(str(a) for a in args), shown)),
+                )
+
+
 def metamorphic_beta(document: Document) -> Iterable[Mutation]:
     """Wrap declaration values in an identity application.
 
@@ -2131,6 +2188,12 @@ CAMPAIGNS: dict[str, Campaign] = {
         ("letTypeMismatch", "thmTypeIsNotProp", "undefined universe parameter", "positivity", "field universe bound",
          "recursor names", "large elimination"),
         single_fault,
+    ),
+    "literal-arith": Campaign(
+        "literal-arith", "guaranteed-accept",
+        "Equations between Nat literals at word/limb edges, true (must accept) and off by one (must reject).",
+        ("Nat literal extension", "GMP/bignum arithmetic", "Bool results of beq/ble"),
+        literal_arith,
     ),
     "declaration-reordering": Campaign(
         "declaration-reordering", "guaranteed-accept",
