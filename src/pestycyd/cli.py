@@ -18,6 +18,7 @@ from .bench import run_bench
 from .efficacy import run_efficacy
 from .campaigns import CAMPAIGNS, selected as selected_campaigns
 from .config import Config, KernelSpec, load_config
+from . import indgen
 from .generators import app_spine, con_k_params, deep_binder
 from .locate import declarations, first_refusal, prefix
 from .minimize import ddmin, well_formed_export
@@ -176,6 +177,35 @@ def generate_app_spine(
     atomic_text(args.output, app_spine(args.depth))
     print(f"generated app-spine depth {args.depth}: {args.output}")
     return 0
+
+
+def generate_inductives(
+    _config: Config | None, _kernels: tuple[KernelSpec, ...], args: argparse.Namespace
+) -> int:
+    results = indgen.generate(args.count, args.seed, args.lean, args.leanexport, args.workers)
+    rejects = args.output / "rejects"
+    rejects.mkdir(parents=True, exist_ok=True)
+    dropped: dict[str, int] = {}
+    kept = shifted = 0
+    for result in results:
+        if result.export is None:
+            reason = re.sub(r"^\S+:\d+:\d+: ", "", result.error)[:100]
+            dropped[reason] = dropped.get(reason, 0) + 1
+            continue
+        kept += 1
+        atomic_text(args.output / f"{result.name}.lean", result.lean)
+        atomic_text(args.output / f"{result.name}.ndjson", result.export)
+        wrong = result.shifted()
+        if wrong is not None:
+            shifted += 1
+            atomic_text(rejects / f"{result.name}.ndjson", wrong)
+    print(
+        f"generated {kept} of {len(results)} families into {args.output} "
+        f"({shifted} off-by-one rejects under {rejects})"
+    )
+    for reason, count in sorted(dropped.items(), key=lambda item: -item[1]):
+        print(f"  dropped {count} × {reason}")
+    return 0 if kept else 1
 
 
 def renumber_command(
@@ -1071,6 +1101,17 @@ def parser() -> argparse.ArgumentParser:
     generator.add_argument("depth", type=int)
     generator.add_argument("output", type=Path)
     generator.set_defaults(function=generate_app_spine, no_config=True)
+    generator = generators.add_parser(
+        "inductives",
+        help="random inductive families elaborated by Lean, with fold theorems and off-by-one rejects",
+    )
+    generator.add_argument("output", type=Path)
+    generator.add_argument("--count", type=int, default=50)
+    generator.add_argument("--seed", type=int, default=0)
+    generator.add_argument("--lean", default="lean", help="lean executable (needs Init)")
+    generator.add_argument("--leanexport", default="leanexport")
+    generator.add_argument("--workers", type=int, default=None)
+    generator.set_defaults(function=generate_inductives, no_config=True)
 
     command = sub.add_parser("matrix", help="run inputs through a kernel matrix")
     command.add_argument("paths", nargs="+")

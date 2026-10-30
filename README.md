@@ -251,6 +251,28 @@ uv run pestycyd generate deep-binder 16382 /tmp/deep.ndjson
 uv run pestycyd generate con-k-params 10000 /tmp/WideK.lean
 ```
 
+`generate inductives` makes new seeds rather than new edits of old ones. It
+draws random inductive families: parameters in `Type`/`Prop`, `Bool`/`Unit`
+indices, the sorts `Prop`, `Type`, `Type u` and `Sort (max 1 u)`, and plain,
+recursive, reflexive (`Bool → T`) and `List`-nested fields. Each family gets
+a closed term and a theorem `@T.rec … term = N := rfl`. Every minor premise
+returns its constructor number plus its recursive results, and Python
+computes the same fold, so `N` is known without asking any checker.
+Lean filters for validity: families it refuses (positivity, universe
+constraints) are dropped and the rest are exported with `leanexport`.
+Propositional families without large elimination are used with a
+`True`-valued motive. For each family with a numeric result,
+`rejects/` holds the same export with `N` off by one, which every checker
+must refuse:
+
+```bash
+B=$(dirname $(elan which lean))
+uv run pestycyd generate inductives /tmp/gen --count 200 --seed 1 \
+  --lean $B/lean --leanexport $B/leanexport
+uv run pestycyd matrix /tmp/gen/*.ndjson /tmp/gen/rejects/*.ndjson
+uv run pestycyd hunt --campaign single-fault --campaign inductive-structure /tmp/gen
+```
+
 The structural campaigns from Pestka's `arena-candidate` branch were ported as
 `expression-structure`, `declaration-structure`, and `inductive-structure`.
 `expression-structure` truncates at the affected declaration for isolated
