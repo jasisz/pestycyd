@@ -600,13 +600,16 @@ def swap_independent_declarations(document: Document, line_no: int) -> bool:
 # independent checker here resolve the native-reduction extension by name
 # (Nat.add, String.append, ...), and Quot primitives are recognized the
 # same way.  Renaming such a declaration changes what the checker trusts,
-# so the metamorphic-rename oracle must not touch them.
+# so the metamorphic-rename oracle must not touch them.  The kernel also
+# strips the binder annotations ``outParam``/``optParam``/``autoParam`` by
+# name when it generates recursors (renamed, ``HMod.rec`` no longer matches).
 SENSITIVE_NAME_ROOTS = frozenset(
     {
         "Nat", "String", "Char", "Quot",
         "Int", "Float", "USize", "ISize",
         "UInt8", "UInt16", "UInt32", "UInt64",
         "Int8", "Int16", "Int32", "Int64",
+        "outParam", "optParam", "autoParam",
     }
 )
 

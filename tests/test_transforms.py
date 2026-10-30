@@ -13,6 +13,7 @@ from pestycyd.transforms import (
     append_prop_impostor,
     append_undeclared_inductive,
     clonable_value,
+    rename_safe,
     swap_independent_declarations,
     wrap_beta,
     wrap_let,
@@ -157,6 +158,12 @@ class TransformTests(unittest.TestCase):
                 self.assertEqual([names[n] for n in ty["levelParams"]], expected)
                 self.assertEqual([names[n] for n in ctor["levelParams"]], expected)
                 self.assertEqual([names[n] for n in rec["levelParams"]], (["u_1"] if site == "type" else []) + expected)
+
+    def test_rename_spares_names_the_kernel_recognizes(self) -> None:
+        names = [{"in": 1, "str": {"pre": 0, "str": "outParam"}}, {"in": 2, "str": {"pre": 0, "str": "Nat"}},
+                 {"in": 3, "str": {"pre": 2, "str": "add"}}, {"in": 4, "str": {"pre": 0, "str": "myDef"}}]
+        document = Document((META, *names))
+        self.assertEqual([rename_safe(document, n) for n in (1, 3, 4)], [False, False, True])
 
     def test_extra_recursor_copies_the_first_recursor_under_a_new_name(self) -> None:
         from pathlib import Path

@@ -56,7 +56,17 @@ pool for corpus seeds and known-bad cases.
   serialized extras: `extra-recursor` copies (and Arena's `rogue`) are
   accepted at the block but absent from the environment (`unknown const
   ….pestycydCopy` on use). Its lone `accept` on `extra-recursor` is
-  conformance divergence, not a hole.
+  conformance divergence, not a hole. The same holds for its lone accepts
+  on `recs[].*`, `ctors[].levelParams/cidx/numFields` and `types[].ctors`
+  mutations (closedness, level-params, inductive-structure): it rebuilds
+  all of them from the block (`checker/inductive/mod.rs` `ctors_env_ext`,
+  `mk_declars`). It needs `--nat-extension --string-extension`, otherwise
+  it *declines* every export with a Nat literal.
+- lean4lean validates the *bodies* of Nat primitives (`invalid form for
+  primitive def Nat.gcd`) through Init helpers it looks up by name (`ite`,
+  `HMod.hMod`, `OfNat.ofNat`, `rfl`, `WellFounded.Nat.fix`, `Bool.casesOn`,
+  ...): metamorphic rewrites of those, which official accepts, make it
+  reject. Stricter than reference by design; hunt with `--protect-prelude`.
 - pestka and lean4lean both resolve re-bound intern ids first-binding-wins
   (`intern-table-shadowing`); con-* decline them, nanoda panics.
 - `leanchecker --from-export` is the reference oracle: Pestka has exact
