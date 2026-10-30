@@ -73,6 +73,13 @@ pool for corpus seeds and known-bad cases.
   `tc.rs:985`). Inert — the lambdas vanish under iota — same class as the
   `nanoda-rule-rhs-wrong-arg` lead. Erase binder types before comparing
   (scratch `erase.py` pattern) to triage nanoclo-only accepts.
+- nanoclo also accepts *swapped* recursor-rule RHS (`recursor-crosswire`
+  `swap-adjacent-rhs-*`) — but only for recursors eliminating into `Prop`.
+  There the swapped RHS is def-eq to the derived one by proof irrelevance
+  once lambda domains are ignored; on `Type` families nanoclo rejects every
+  swap (43/43 in the generated-seed hunt). Inert, same family as the
+  withdrawn nanoda #76 / sokonanoda #11 reports. Left untriaged on purpose:
+  a rule cannot yet tell `Prop` from `Type` recursors.
 - lean4lean validates the *bodies* of Nat primitives (`invalid form for
   primitive def Nat.gcd`) through Init helpers it looks up by name (`ite`,
   `HMod.hMod`, `OfNat.ofNat`, `rfl`, `WellFounded.Nat.fix`, `Bool.casesOn`,

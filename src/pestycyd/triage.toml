@@ -69,6 +69,16 @@ output = "unknown key|Expr\\.mdata not supported"
 # --- Rejections by another route. ----------------------------------------
 
 [[rule]]
+id = "sokonanoda-panic-rejection"
+why = """sokonanoda panics on malformed input (loose bound variables, dangling
+level references in its parser) instead of rejecting cleanly; with an invalid
+input that is a rejection, though a robustness wart."""
+kernels = ["sokonanoda*"]
+status = ["crash", "error", "reject"]
+expected = ["reject"]
+output = "panicked at"
+
+[[rule]]
 id = "nanoda-panic-rejection"
 why = """nanoda-family checkers reject ill-typed input by panicking on an
 internal assertion; with an invalid input that is a rejection, not a crash."""
@@ -84,12 +94,14 @@ id = "sokonanoda-derived-recursors"
 why = """sokonanoda installs only the recursors it derives from the block and
 rebuilds constructor metadata, types[].ctors and the block's all list from
 the type records, ignoring the serialized copies, so edits confined to them
-do not reach it (AGENTS.md)."""
+do not reach it (AGENTS.md). A block whose types are all omitted installs
+nothing: a later use fails with an unknown constant."""
 kernels = ["sokonanoda*"]
 status = ["accept"]
 expected = ["reject"]
 sites = [
     "inductive.recs.*",
+    "inductive.types",
     "inductive.types.ctors",
     "inductive.types.all",
     "inductive.ctors.levelParams",
@@ -124,7 +136,26 @@ rules[] entirely (a rhs pointing at Sort still accepts)."""
 kernels = ["con-*"]
 status = ["accept"]
 expected = ["reject"]
-sites = ["inductive.recs.rules*", "inductive.recs.all", "inductive.types.all"]
+sites = ["inductive.recs.rules*", "inductive.recs.all", "inductive.recs.k", "inductive.types.all"]
+
+[[rule]]
+id = "con-rederived-recursor"
+why = """The reference rejects only the serialized recursor, which no longer
+matches the (still valid) block; con-* derive the recursor and accept."""
+kernels = ["con-*"]
+status = ["accept"]
+expected = ["reject"]
+reference = "Invalid recursor"
+
+[[rule]]
+id = "omitted-recursor-strictness"
+why = """With a recursor left out of the block the reference derives it and
+accepts; con-*, the nanoda family (coverage check from nanoda PR #65), tenet
+and kefir require every recursor to be serialized. Stricter than reference."""
+kernels = ["con-*", "nanoda*", "nanoclo*", "nanobruijn*", "tenet*", "kefir*"]
+status = ["reject", "crash", "decline"]
+expected = ["accept"]
+sites = ["inductive.recs"]
 
 [[rule]]
 id = "official-rederives-inductive-metadata"
@@ -174,3 +205,12 @@ kernels = ["nanoda*", "nanoclo*", "nanobruijn*"]
 status = ["accept"]
 expected = ["reject"]
 labels = ["undeclared-universe-inductive-type"]
+
+[[rule]]
+id = "nanoda-79-undeclared-universe-in-inductive-type"
+why = "nanoda#79 reached by a level edit that only inductive types use."
+kernels = ["nanoda*", "nanoclo*", "nanobruijn*"]
+status = ["accept"]
+expected = ["reject"]
+reference = "undefined universe level parameter"
+sites = ["inductive.types.type", "inductive.ctors.type", "inductive.recs.*"]

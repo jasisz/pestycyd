@@ -587,7 +587,8 @@ def run_hunt(
             if interesting:
                 findings += 1
                 mutation_json = mutation.json()
-                sites = mutation_sites(child.lines, mutation_json)
+                # Mutation lines index the parent; sharing may renumber the child.
+                sites = mutation_sites(document.lines, mutation_json)
                 verdict = triage(
                     rules,
                     mutation.campaign,
