@@ -67,6 +67,12 @@ pool for corpus seeds and known-bad cases.
   all of them from the block (`checker/inductive/mod.rs` `ctors_env_ext`,
   `mk_declars`). It needs `--nat-extension --string-extension`, otherwise
   it *declines* every export with a Nat literal.
+- nanoclo's NbE conversion ignores `lam` binder domains, so it admits a
+  serialized recursor rule whose RHS differs from the derived one only in
+  lambda annotations (official/nanoda master reject: `Invalid recursor`,
+  `tc.rs:985`). Inert — the lambdas vanish under iota — same class as the
+  `nanoda-rule-rhs-wrong-arg` lead. Erase binder types before comparing
+  (scratch `erase.py` pattern) to triage nanoclo-only accepts.
 - lean4lean validates the *bodies* of Nat primitives (`invalid form for
   primitive def Nat.gcd`) through Init helpers it looks up by name (`ite`,
   `HMod.hMod`, `OfNat.ofNat`, `rfl`, `WellFounded.Nat.fix`, `Bool.casesOn`,
