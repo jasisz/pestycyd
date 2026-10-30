@@ -7,10 +7,13 @@ from pestycyd.ndjson import Document
 from pestycyd.transforms import (
     FIELD_FAULTS,
     NONZERO_IMPOSTORS,
+    SAFETY_FAULTS,
     UNDECLARED_INDUCTIVE_SITES,
     ZERO_DISGUISES,
     append_field_inductive,
     append_prop_impostor,
+    append_index_elimination,
+    append_safety_fault,
     append_undeclared_inductive,
     clonable_value,
     rename_safe,
@@ -110,6 +113,8 @@ class TransformTests(unittest.TestCase):
                 "let-ill-typed-def", "theorem-of-type", "undeclared-universe", "non-positive",
                 "field-too-large", "large-elimination-two-ctors", "large-elimination-data-field",
                 "undeclared-universe-inductive-type", "undeclared-universe-inductive-ctor",
+                "unsafe-in-safe", "unsafe-loop-theorem", "partial-in-safe", "opaque-unfolded",
+                "large-elimination-field-inside-index",
             },
         )
         self.assertTrue(all(m.oracle == "guaranteed-reject" for m in mutations.values()))
@@ -164,6 +169,19 @@ class TransformTests(unittest.TestCase):
                  {"in": 3, "str": {"pre": 2, "str": "add"}}, {"in": 4, "str": {"pre": 0, "str": "myDef"}}]
         document = Document((META, *names))
         self.assertEqual([rename_safe(document, n) for n in (1, 3, 4)], [False, False, True])
+
+    def test_safety_and_index_faults_differ_from_their_controls_in_one_place(self) -> None:
+        for fault in SAFETY_FAULTS:
+            bad, good = append_safety_fault(self.document, fault), append_safety_fault(self.document, fault, True)
+            self.assert_well_formed(bad)
+            self.assert_well_formed(good)
+            self.assertEqual(len(bad.lines), len(good.lines))
+        bad, good = append_index_elimination(self.document), append_index_elimination(self.document, True)
+        self.assert_well_formed(bad)
+        self.assert_well_formed(good)
+        (ctor,) = next(line["inductive"] for line in reversed(bad.lines) if "inductive" in line)["ctors"]
+        index = expr_table(bad)[expr_table(bad)[ctor["type"]]["forallE"]["body"]]["app"]["arg"]
+        self.assertIn("forallE", expr_table(bad)[index])
 
     def test_extra_recursor_copies_the_first_recursor_under_a_new_name(self) -> None:
         from pathlib import Path

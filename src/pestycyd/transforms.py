@@ -863,6 +863,124 @@ class _Appender:
         return self.add("ie", app={"fn": fn, "arg": arg})
 
 
+# Declaration-safety faults: the kernel keeps unsafe and partial constants
+# out of safe declarations and never unfolds an opaque one.
+SAFETY_FAULTS = ("unsafe-in-safe", "unsafe-loop-theorem", "partial-in-safe", "opaque-unfolded")
+
+
+def append_safety_fault(document: Document, fault: str, control: bool = False) -> Document:
+    """Append a constant of restricted safety and a declaration that misuses it.
+
+    With ``F := ∀ p : Prop, p`` (a closed falsehood) and ``T := ∀ p : Prop, p → p``:
+
+    - ``unsafe-in-safe``: ``unsafe def k : Prop := F``, then ``def use : Prop := k``;
+    - ``unsafe-loop-theorem``: ``unsafe def k : F := k``, then ``theorem use : F := k``,
+      a closed proof of ``False`` if a checker lets it through;
+    - ``partial-in-safe``: as ``unsafe-in-safe`` with ``k`` partial;
+    - ``opaque-unfolded``: ``opaque k : Prop := T``, then ``theorem use : k := fun p h => h``,
+      which typechecks only by unfolding ``k``.
+
+    ``control`` keeps the shape and lifts the one restriction: ``use`` becomes
+    unsafe (``k`` becomes a plain definition for ``opaque-unfolded``).  Partial
+    definitions may recur like unsafe ones (``partial def k : F := k`` is
+    accepted), so recursion alone is no fault.
+    """
+    if fault not in SAFETY_FAULTS:
+        raise ValueError(f"unknown safety fault: {fault}")
+    lines = [copy.deepcopy(line) for line in document.lines]
+    out = _Appender(lines)
+    k_name = out.name("pestycydRestricted")
+    use_name = out.name("pestycydUse")
+    p_name, h_name = out.name("p"), out.name("h")
+    prop = out.add("ie", sort=0)
+    b0, b1 = out.add("ie", bvar=0), out.add("ie", bvar=1)
+    false_ = out.pi(p_name, prop, b0)
+    k = out.add("ie", const={"name": k_name, "us": []})
+
+    def definition(name: int, type_: int, value: int, safety: str) -> dict[str, object]:
+        return {"def": {"all": [name], "hints": "opaque", "levelParams": [], "name": name,
+                        "safety": safety, "type": type_, "value": value}}
+
+    if fault in ("unsafe-in-safe", "partial-in-safe"):
+        restricted = "unsafe" if fault == "unsafe-in-safe" else "partial"
+        lines.append(definition(k_name, prop, false_, restricted))
+        lines.append(definition(use_name, prop, k, "unsafe" if control else "safe"))
+    elif fault == "unsafe-loop-theorem":
+        lines.append(definition(k_name, false_, k, "unsafe"))
+        if control:
+            lines.append(definition(use_name, false_, k, "unsafe"))
+        else:
+            lines.append({"thm": {"all": [use_name], "levelParams": [], "name": use_name, "type": false_, "value": k}})
+    else:
+        true_ = out.pi(p_name, prop, out.pi(h_name, b0, b1))
+        proof = out.lam(p_name, prop, out.lam(h_name, b0, b0))
+        if control:
+            lines.append(definition(k_name, prop, true_, "safe"))
+        else:
+            lines.append({"opaque": {"all": [k_name], "isUnsafe": False, "levelParams": [], "name": k_name,
+                                     "type": prop, "value": true_}})
+        lines.append({"thm": {"all": [use_name], "levelParams": [], "name": use_name, "type": k, "value": proof}})
+    return Document(tuple(lines))
+
+
+def append_index_elimination(document: Document, control: bool = False) -> Document:
+    """Append ``Q : Prop → Prop`` with a large recursor, then use it at ``Type``.
+
+    A proposition eliminates into every universe when each constructor
+    field that is not a proof is itself an index of the constructor's
+    result, as in ``Eq``.  ``control`` is ``mk : (x : Prop) → Q x``; the
+    fault is ``mk : (x : Prop) → Q (x → x)``, where ``x`` only occurs
+    inside an index, so only the small recursor is derivable and
+    ``use := fun a t => Q.rec (fun _ _ => Type) (fun _ => Prop) t`` needs
+    the forged large one.
+    """
+    lines = [copy.deepcopy(line) for line in document.lines]
+    out = _Appender(lines)
+    q_name = out.name("PestycydIndexed")
+    mk_name = out.add("in", str={"pre": q_name, "str": "mk"})
+    rec_name = out.add("in", str={"pre": q_name, "str": "rec"})
+    use_name = out.add("in", str={"pre": q_name, "str": "use"})
+    u_name, motive_name, a_name, t_name, x_name, h_name = (
+        out.name(text) for text in ("u", "motive", "a", "t", "x", "h")
+    )
+    one = out.add("il", succ=0)
+    two = out.add("il", succ=one)
+    u = out.add("il", param=u_name)
+    prop, type_, sort_u = out.add("ie", sort=0), out.add("ie", sort=one), out.add("ie", sort=u)
+    b0, b1, b3 = out.add("ie", bvar=0), out.add("ie", bvar=1), out.add("ie", bvar=3)
+    q = out.add("ie", const={"name": q_name, "us": []})
+    mk = out.add("ie", const={"name": mk_name, "us": []})
+    # The index of ``mk x`` with ``x`` bound at 0.
+    index = b0 if control else out.pi(h_name, b0, b1)
+    q_type = out.pi(a_name, prop, prop)
+    ctor_type = out.pi(x_name, prop, out.app(q, index))
+    motive_type = out.pi(a_name, prop, out.pi(t_name, out.app(q, b0), sort_u))
+    # Under motive: ∀ (x : Prop), motive (index x) (mk x).
+    minor = out.pi(x_name, prop, out.app(out.app(b1, index), out.app(mk, b0)))
+    # ∀ {motive} (mk : minor) {a : Prop} (t : Q a), motive a t.
+    rec_type = out.pi(motive_name, motive_type, out.pi(mk_name, minor, out.pi(
+        a_name, prop, out.pi(t_name, out.app(q, b0), out.app(out.app(b3, b1), b0)), implicit=True)), implicit=True)
+    rhs = out.lam(motive_name, motive_type, out.lam(mk_name, minor, out.lam(x_name, prop, out.app(b1, b0))))
+    lines.append({"inductive": {
+        "types": [{"all": [q_name], "ctors": [mk_name], "isRec": False, "isReflexive": False, "isUnsafe": False,
+                   "levelParams": [], "name": q_name, "numIndices": 1, "numNested": 0, "numParams": 0,
+                   "type": q_type}],
+        "ctors": [{"cidx": 0, "induct": q_name, "isUnsafe": False, "levelParams": [], "name": mk_name,
+                   "numFields": 1, "numParams": 0, "type": ctor_type}],
+        "recs": [{"all": [q_name], "isUnsafe": False, "k": False, "levelParams": [u_name], "name": rec_name,
+                  "numIndices": 1, "numMinors": 1, "numMotives": 1, "numParams": 0,
+                  "rules": [{"ctor": mk_name, "nfields": 1, "rhs": rhs}], "type": rec_type}],
+    }})
+    # use := fun (a : Prop) (t : Q a) => @Q.rec.{2} (fun _ _ => Type) (fun _ => Prop) a t.
+    motive = out.lam(a_name, prop, out.lam(t_name, out.app(q, b0), type_))
+    term = out.app(out.app(out.add("ie", const={"name": rec_name, "us": [two]}), motive), out.lam(x_name, prop, prop))
+    value = out.lam(a_name, prop, out.lam(t_name, out.app(q, b0), out.app(out.app(term, b1), b0)))
+    lines.append({"def": {"all": [use_name], "hints": "abbrev", "levelParams": [], "name": use_name,
+                          "safety": "safe", "type": out.pi(a_name, prop, out.pi(t_name, out.app(q, b0), type_)),
+                          "value": value}})
+    return Document(tuple(lines))
+
+
 def append_undeclared_universe(document: Document) -> Document:
     """Append ``def k.{v} : Type := Prop`` and ``def bad : Type := k.{u}``.
 
@@ -1155,6 +1273,10 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return _shared(append_undeclared_universe(Document(tuple(lines))))
     if kind == "append-undeclared-inductive":
         return _shared(append_undeclared_inductive(Document(tuple(lines)), str(rewrite.params[0])))
+    if kind == "append-safety-fault":
+        return _shared(append_safety_fault(Document(tuple(lines)), str(rewrite.params[0])))
+    if kind == "append-index-elimination":
+        return _shared(append_index_elimination(Document(tuple(lines))))
     if kind == "append-prop-impostor":
         return _shared(append_prop_impostor(Document(tuple(lines)), str(rewrite.params[0])))
     if kind == "disguise-prop-sort":

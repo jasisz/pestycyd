@@ -9,6 +9,7 @@ from .ndjson import Document, Edit, LineEdit, Mutation, Rewrite, walk_objects
 from .rewrite import TRUSTED_PRELUDE, _declared, _name_strings
 from .transforms import (
     NONZERO_IMPOSTORS,
+    SAFETY_FAULTS,
     ZERO_DISGUISES,
     clonable_value,
     rename_safe,
@@ -1746,6 +1747,19 @@ def single_fault(document: Document) -> Iterable[Mutation]:
         len(lines) - 1, (), "levelParams", "u",
         "constant instantiated with an unbound universe parameter",
         rewrite=Rewrite("append-undeclared-universe", len(lines) - 1),
+    )
+    for fault in SAFETY_FAULTS:
+        yield Mutation(
+            "single-fault", fault, "guaranteed-reject",
+            len(lines) - 1, (), "safety", fault,
+            "safe declarations never use unsafe or partial constants; opaque ones never unfold",
+            rewrite=Rewrite("append-safety-fault", len(lines) - 1, (), (fault,)),
+        )
+    yield Mutation(
+        "single-fault", "large-elimination-field-inside-index", "guaranteed-reject",
+        len(lines) - 1, (), "inductive", "index",
+        "a proposition's data fields must be literal indices for large elimination",
+        rewrite=Rewrite("append-index-elimination", len(lines) - 1),
     )
     for site in ("type", "ctor"):
         yield Mutation(
