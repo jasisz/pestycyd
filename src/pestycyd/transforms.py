@@ -14,6 +14,7 @@ import copy
 
 from .ndjson import Document, Rewrite
 from .rewrite import (
+    DECLARATION_KINDS,
     FRESH,
     _renumber,
     _resolve,
@@ -829,6 +830,91 @@ def theorem_of_type(document: Document, line_no: int) -> Document:
     return Document(tuple(lines))
 
 
+def _delta_plan(document: Document, line_no: int) -> tuple[dict[int, int], list[int]]:
+    """The ``const`` records naming the definition at ``line_no`` mapped to
+    its value, and the lines whose references to them get rewritten."""
+    lines = list(document.lines)
+    definition = lines[line_no].get("def")
+    if not isinstance(definition, dict) or definition.get("safety") != "safe" or definition.get("levelParams"):
+        raise ValueError("unfold needs a safe definition without universe parameters")
+    name, value = definition.get("name"), definition.get("value")
+    if not isinstance(name, int) or not isinstance(value, int) or not rename_safe(document, name):
+        raise ValueError("unfold needs a plainly named definition with a value")
+    constants: dict[int, int] = {}
+    dirty: set[int] = set()
+    sites: list[int] = []
+    origin = None
+    for index, line in enumerate(lines):
+        declared = declares_table_id(line)
+        if declared is not None and declared[0] == "ie" and declared[1] == value:
+            origin = index
+        const = line.get("const")
+        if isinstance(const, dict) and const.get("name") == name and not const.get("us"):
+            constants[line["ie"]] = value  # type: ignore[index]
+            dirty.add(line["ie"])  # type: ignore[arg-type]
+            continue
+        referenced = {owner.get(field) for path, field in expression_reference_sites(line)
+                      if isinstance(owner := _resolve(line, path), dict)}
+        if not referenced & dirty:
+            continue
+        if origin is None or index <= origin:
+            raise ValueError("a use of the definition precedes its value")
+        if declared is not None and declared[0] == "ie":
+            if referenced & constants.keys():
+                sites.append(index)
+            dirty.add(declared[1])
+        elif any(kind in line for kind in DECLARATION_KINDS):
+            if referenced & constants.keys():
+                sites.append(index)
+        else:
+            raise ValueError("an inductive or quotient declaration mentions the definition")
+    if not sites:
+        raise ValueError("the definition has no uses")
+    return constants, sites
+
+
+def unfoldable(document: Document, line_no: int) -> bool:
+    try:
+        _delta_plan(document, line_no)
+    except ValueError:
+        return False
+    return True
+
+
+def unfold_definition(document: Document, line_no: int) -> Document:
+    """Replace every use of ``d := v`` (no universe parameters) with ``v``.
+
+    Delta reduction is definitional, so each rewritten type and value is
+    definitionally equal to the original.  Inductive and quotient
+    declarations are left alone: their constructor types are checked
+    syntactically, not up to conversion.
+    """
+    constants, sites = _delta_plan(document, line_no)
+    lines = list(document.lines)
+    for index in sites:
+        _rewrite_references(lines[index], constants, {}, {}, strict=False)
+    return Document(tuple(lines))
+
+
+def retag_as_definition(document: Document, line_no: int) -> Document:
+    """Turn a theorem or a safe opaque constant into an opaque-hinted definition.
+
+    Definitions unfold wherever theorems and opaque constants do (or
+    more), so everything that checked before still checks.
+    """
+    lines = list(document.lines)
+    line = lines[line_no]
+    kind = next((kind for kind in ("thm", "opaque") if isinstance(line.get(kind), dict)), None)
+    if kind is None or (kind == "opaque" and line[kind].get("isUnsafe") is not False):  # type: ignore[union-attr]
+        raise ValueError("retag needs a theorem or a safe opaque constant")
+    payload = line[kind]
+    lines[line_no] = {"def": {
+        **{key: payload[key] for key in ("all", "levelParams", "name", "type", "value") if key in payload},  # type: ignore[index]
+        "hints": "opaque", "safety": "safe",
+    }}
+    return Document(tuple(lines))
+
+
 class _Appender:
     """Appends records under fresh table identifiers past every existing one."""
 
@@ -1318,6 +1404,10 @@ def apply_rewrite(document: Document, rewrite: Rewrite) -> Document:
         return _shared(wrap_let(Document(tuple(lines)), rewrite.line, tuple(rewrite.path)))
     if kind == "rename-declaration":
         return rename_declaration(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
+    if kind == "unfold-definition":
+        return _shared(unfold_definition(Document(tuple(lines)), rewrite.line))
+    if kind == "retag-as-definition":
+        return retag_as_definition(Document(tuple(lines)), rewrite.line)
     if kind == "clone-value-dag":
         return clone_value_dag(Document(tuple(lines)), rewrite.line, tuple(rewrite.path))
     if kind == "swap-declarations":

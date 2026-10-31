@@ -276,7 +276,8 @@ uv run pestycyd hunt --campaign single-fault --campaign inductive-structure /tmp
 `generate nested` goes where hand-written recursor applications cannot:
 mutual blocks of one to three types, optionally `Bool`-indexed, whose fields
 nest the block up to three containers deep through `List`, `Option`, `×`,
-`Array` and four containers declared alongside (`Rose`, itself nested;
+`Array`, `ULift`, `Subtype`, `Σ n, Vec _ n` (the occurrence under a binder,
+indexed by the bound variable) and four containers declared alongside (`Rose`, itself nested;
 `Pair2`, a structure over `List`; `Vec`, indexed; `Wrap`, reflexive). The
 theorem is `Nat.add 1000000 (sizeOf term) = 1000000 + N := rfl`: Lean
 derives `SizeOf` through the block's recursors, one motive per nested
@@ -333,7 +334,10 @@ The metamorphic campaigns are the first built-in users of the
 `metamorphic-beta` wraps a declaration value in an identity application,
 `metamorphic-let` in a redundant `let`, `metamorphic-eta` expands a Pi-typed
 value to `fun x => v x`, `metamorphic-rename` renames a declaration
-consistently to a fresh name, `expression-unsharing` rebuilds a shared value
+consistently to a fresh name, `metamorphic-delta` unfolds a definition into
+its uses, changes its reducibility hints or retags a theorem or opaque
+constant as a definition (after [nano-lean](https://github.com/sdiehl/nano-lean)'s
+mutator), `expression-unsharing` rebuilds a shared value
 DAG as a private copy, and `declaration-reordering` moves a declaration past
 an independent neighbour — so any rejection is a completeness finding. The
 rewrites are real graph transformations: inserted expression records force a

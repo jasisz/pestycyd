@@ -18,6 +18,7 @@ from pestycyd.transforms import (
     clonable_value,
     rename_safe,
     swap_independent_declarations,
+    unfoldable,
     wrap_beta,
     wrap_let,
 )
@@ -218,6 +219,47 @@ class TransformTests(unittest.TestCase):
         application = table[lam["body"]]["app"]
         self.assertEqual(application["fn"], 1)  # the original value
         self.assertEqual(table[application["arg"]]["bvar"], 0)
+
+    def delta_document(self, *uses: dict[str, object]) -> Document:
+        """``def c : Sort 1 := Sort 0`` and ``def d : Sort 1 := c``."""
+        return Document(
+            (
+                META,
+                {"in": 1, "str": {"pre": 0, "str": "c"}},
+                {"in": 2, "str": {"pre": 0, "str": "d"}},
+                {"il": 1, "succ": 0},
+                {"ie": 0, "sort": 0},
+                {"ie": 1, "sort": 1},
+                def_line(1, 1, 0),
+                {"ie": 2, "const": {"name": 1, "us": []}},
+                def_line(2, 1, 2),
+                *uses,
+            )
+        )
+
+    def test_metamorphic_delta_unfolds_definition_into_uses(self) -> None:
+        document = self.delta_document()
+        unfolds = [m for m in CAMPAIGNS["metamorphic-delta"].generate(document) if m.label == "def-unfold"]
+        self.assertEqual([m.line for m in unfolds], [6])  # d has no uses
+        changed = document.mutated(unfolds[0])
+        self.assert_well_formed(changed)
+        self.assertEqual(changed.lines[-1]["def"]["value"], 0)
+
+    def test_metamorphic_delta_leaves_inductives_alone(self) -> None:
+        block = {"inductive": {"types": [{"name": 2, "type": 2}], "ctors": [], "recs": []}}
+        self.assertFalse(unfoldable(self.delta_document(block), 6))
+
+    def test_metamorphic_delta_hints_and_retags(self) -> None:
+        theorem = {"thm": {"all": [2], "levelParams": [], "name": 2, "type": 1, "value": 0}}
+        document = self.delta_document()
+        document = Document((*document.lines[:-1], theorem))
+        mutations = list(CAMPAIGNS["metamorphic-delta"].generate(document))
+        labels = sorted(m.label for m in mutations)
+        self.assertEqual(labels.count("thm-as-def"), 1)
+        self.assertEqual(len([label for label in labels if label.startswith("def-hints-")]), 4)
+        retag = next(m for m in mutations if m.label == "thm-as-def")
+        definition = document.mutated(retag).lines[-1]["def"]
+        self.assertEqual((definition["hints"], definition["safety"], definition["value"]), ("opaque", "safe", 0))
 
     def test_wrap_eta_skips_non_pi_types(self) -> None:
         document = Document(

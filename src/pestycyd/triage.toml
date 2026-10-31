@@ -257,6 +257,17 @@ status = ["accept", "reject", "crash", "decline"]
 labels = ["types-*-levels-*"]
 
 [[rule]]
+id = "lean4-15643-replay-quot"
+why = """Reported as lean4#15643 (also lean4lean#66): leanchecker --from-export
+erases Quot.mk/lift/ind from the replay map, so a declaration that uses them
+without mentioning Quot is replayed before the quotient exists whenever name
+order has not reached Quot yet; it then rejects a valid export."""
+kernels = ["official*", "paranoid*", "lean4lean*"]
+status = ["reject"]
+expected = ["accept"]
+output = "unknown constant '?Quot\\.(mk|lift|ind)"
+
+[[rule]]
 id = "lean4-16133-replay-mutual-order"
 why = """Reported as lean4#16133: Lean.Replay (leanchecker --from-export,
 lean4lean --import) adds a mutual block before constants that only a later
@@ -266,3 +277,14 @@ kernels = ["official*", "paranoid*", "lean4lean*"]
 status = ["reject"]
 expected = ["accept"]
 output = "unknown constant"
+
+[[rule]]
+id = "nanoda-hints-height-u16"
+why = """The nanoda family (nanoda, nanoclo, sokonanoda) parses a definition's
+`regular` reducibility height as u16, while Lean's is UInt32: heights above
+65535 are refused at parse time. Lean only computes heights that large for
+very long definition chains."""
+kernels = ["nanoda*", "nanoclo*", "sokonanoda*"]
+status = ["reject", "decline", "crash"]
+expected = ["accept"]
+output = "expected u16"

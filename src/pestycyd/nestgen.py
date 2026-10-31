@@ -3,9 +3,11 @@
 ``indgen`` writes the recursor application by hand, which limits it to one
 type nested through ``List``.  Here the blocks hold one to three mutual
 types, optionally indexed by ``Bool``, whose fields nest the block through
-``List``, ``Option``, ``×``, ``Array`` and four containers declared in the
-module: ``Rose`` (itself nested), ``Pair2`` (a structure over ``List``),
-``Vec`` (indexed) and ``Wrap`` (reflexive), up to three containers deep.
+``List``, ``Option``, ``×``, ``Array``, ``ULift``, ``Subtype``, a ``Σ``
+over ``Vec`` (the nested occurrence under a binder, indexed by the bound
+variable) and four containers declared in the module: ``Rose`` (itself
+nested), ``Pair2`` (a structure over ``List``), ``Vec`` (indexed) and
+``Wrap`` (reflexive), up to three containers deep.
 Lean derives ``SizeOf`` for the block through its recursors, one motive per
 nested auxiliary type, so
 
@@ -39,7 +41,7 @@ PRELUDE = {
     "Vec": "inductive Vec (α : Type u) : Nat → Type u where\n  | nil : Vec α 0\n  | cons : α → Vec α n → Vec α (n + 1)",
     "Wrap": "inductive Wrap (α : Type u) : Type u where\n  | none\n  | one : α → Wrap α\n  | many : (Bool → Wrap α) → Wrap α",
 }
-CONTAINERS = ("List", "Option", "Prod", "Array", "Rose", "Pair2", "Vec", "Wrap")
+CONTAINERS = ("List", "Option", "Prod", "Array", "Rose", "Pair2", "Vec", "Wrap", "ULift", "Subtype", "Sigma")
 # A field type is a tuple: ("bool",), ("nat",), ("ref", T, index|None),
 # ("refl", ref) for Bool → ref, or (container, inner[, second]).
 FieldType = tuple
@@ -67,7 +69,7 @@ class Block:
         if r < 0.5 and depth == 0:
             return ("refl", self._ref())
         container = self.rng.choice(CONTAINERS)
-        self.used.add(container)
+        self.used.update(("Vec",) if container == "Sigma" else (container,))
         parts = [self._field(depth + 1, False) if self.rng.random() < 0.5 else self._ref()]
         if container in {"Prod", "Pair2"}:
             parts.append(self._field(depth + 1, False) if self.rng.random() < 0.5 else self._ref())
@@ -103,6 +105,12 @@ class Block:
             return f"(Pair2 ({self.show(ty[1], levels)}) ({self.show(ty[2], levels)}))"
         if kind == "Vec":
             return f"(Vec ({self.show(ty[1], levels)}) {length})"
+        if kind == "Sigma":
+            return f"(Σ n, Vec ({self.show(ty[1], levels)}) n)"
+        if kind == "Subtype":
+            return f"{{x : {self.show(ty[1], levels)} // True}}"
+        if kind == "ULift":
+            return f"(ULift.{{0}} ({self.show(ty[1], levels)}))"
         return f"({kind} ({self.show(ty[1], levels)}))"
 
     def declaration(self) -> str:
@@ -153,6 +161,12 @@ class Block:
         if kind == "Vec":
             second = sub(ty[1])
             return f"(Vec.cons {first} (Vec.cons {second} Vec.nil))" if second else None
+        if kind == "Sigma":
+            return f"⟨1, Vec.cons {first} Vec.nil⟩" if rng.random() < 0.8 else "⟨0, Vec.nil⟩"
+        if kind == "Subtype":
+            return f"⟨{first}, trivial⟩"
+        if kind == "ULift":
+            return f"(ULift.up {first})"
         if kind == "Rose":
             kids = [f"(Rose.node {x} [])" for x in some(ty[1], (0, 1, 2))]
             return f"(Rose.node {first} [{', '.join(kids)}])"
@@ -199,7 +213,9 @@ class Block:
         else:
             kind, inner = ty[0], ty[1]
             m = lambda item, var: self.measure(item, var, defs)  # noqa: E731
-            signature = self.show(ty, levels=True, length="n")[1:-1]
+            signature = self.show(ty, levels=True, length="n")
+            if kind not in {"Sigma", "Subtype"}:  # their brackets are syntax
+                signature = signature[1:-1]
             if kind == "List":
                 arms = ["  | [] => 0", f"  | x :: xs => 1 + {m(inner, 'x')} + {name} xs"]
             elif kind == "Option":
@@ -213,6 +229,11 @@ class Block:
             elif kind == "Vec":
                 signature = f"{{n : Nat}} → {signature}"
                 arms = ["  | _, .nil => 0", f"  | _, .cons a v => 1 + {m(inner, 'a')} + {name} v"]
+            elif kind == "Sigma":
+                arms = [f"  | ⟨_, v⟩ => 1 + {m(('Vec', inner), 'v')}"]
+            elif kind in {"Subtype", "ULift"}:
+                pattern = "⟨a, _⟩" if kind == "Subtype" else "⟨a⟩"
+                arms = [f"  | {pattern} => {m(inner, 'a')}"]
             elif kind == "Rose":
                 arms = [f"  | .node a kids => 1 + {m(inner, 'a')} + {m(('List', ty), 'kids')}"]
             else:  # Wrap

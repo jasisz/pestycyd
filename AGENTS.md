@@ -91,11 +91,23 @@ pool for corpus seeds and known-bad cases.
   order reaches an earlier member first (lean4#16133, `Lean/Replay.lean`).
   The official verdict is then wrong: check `unknown constant` rejections
   against the export before trusting them as the expected status.
+- The same three reject valid exports that use `Quot.mk`/`Quot.lift`/`Quot.ind`
+  without naming `Quot` (`unknown constant 'Quot.lift'`, name-dependent):
+  `checkExport` erases those names from the replay map, so nothing forces
+  `Quot` in first. Already reported as lean4#15643 and lean4lean#66.
 - lean4lean validates the *bodies* of Nat primitives (`invalid form for
   primitive def Nat.gcd`) through Init helpers it looks up by name (`ite`,
   `HMod.hMod`, `OfNat.ofNat`, `rfl`, `WellFounded.Nat.fix`, `Bool.casesOn`,
   ...): metamorphic rewrites of those, which official accepts, make it
   reject. Stricter than reference by design; hunt with `--protect-prelude`.
+- The nanoda family (nanoda, nanoda master, nanoclo, sokonanoda) parses
+  `hints.regular` as u16 (`expected u16`): a height above 65535 is refused at
+  parse time, though Lean's is UInt32. `metamorphic-delta`'s
+  `def-hints-regular-max` hits it on every seed; triaged, not reported (Lean
+  never computes such heights in practice).
+- Hunt nano-lean's fixtures with `--finding-require-seed-change`:
+  `primitives.ndjson` (lean4#15643) and `forged-nat-add.ndjson` (a forged
+  `Nat.add` proving `False`) already diverge as seeds.
 - pestka and lean4lean both resolve re-bound intern ids first-binding-wins
   (`intern-table-shadowing`); con-* decline them, nanoda panics.
 - `leanchecker --from-export` is the reference oracle: Pestka has exact

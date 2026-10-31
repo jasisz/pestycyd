@@ -16,6 +16,7 @@ from .transforms import (
     rename_safe,
     sort_valued_telescope,
     swap_independent_declarations,
+    unfoldable,
 )
 
 
@@ -1908,6 +1909,43 @@ def metamorphic_rename(document: Document) -> Iterable[Mutation]:
             )
 
 
+# Reducibility hints only order lazy delta unfolding: any hint is sound.
+HINTS = {"abbrev": "abbrev", "opaque": "opaque", "regular-0": {"regular": 0}, "regular-max": {"regular": 2**32 - 1}}
+
+
+def metamorphic_delta(document: Document) -> Iterable[Mutation]:
+    """Rewrites the kernel's delta reduction cannot tell apart.
+
+    Unfold a definition into its uses, change a definition's reducibility
+    hints, or turn a theorem or opaque constant into a definition.  Each
+    keeps every declaration definitionally equal to the original.
+    """
+    for line_no, line in enumerate(document.lines):
+        definition = line.get("def")
+        if isinstance(definition, dict) and _safe("def", definition):
+            if unfoldable(document, line_no):
+                yield Mutation(
+                    "metamorphic-delta", "def-unfold", "guaranteed-accept",
+                    line_no, ("def",), "document", "unfold-definition",
+                    "delta unfolding preserves every use",
+                    rewrite=Rewrite("unfold-definition", line_no, ("def",)),
+                )
+            for label, hints in HINTS.items():
+                if definition.get("hints") != hints:
+                    yield Mutation(
+                        "metamorphic-delta", f"def-hints-{label}", "guaranteed-accept",
+                        line_no, ("def",), "hints", hints, "reducibility hints only order unfolding",
+                    )
+        for kind in ("thm", "opaque"):
+            if isinstance(line.get(kind), dict) and _safe(kind, line[kind]) and isinstance(line[kind].get("value"), int):
+                yield Mutation(
+                    "metamorphic-delta", f"{kind}-as-def", "guaranteed-accept",
+                    line_no, (kind,), "document", "retag-as-definition",
+                    "a definition unfolds wherever the original did",
+                    rewrite=Rewrite("retag-as-definition", line_no, (kind,)),
+                )
+
+
 def expression_unsharing(document: Document) -> Iterable[Mutation]:
     """Clone a shared value DAG into a private, structurally identical copy."""
     for line_no, kind in _typed_value_declarations(document):
@@ -2163,6 +2201,12 @@ CAMPAIGNS: dict[str, Campaign] = {
         "Consistently rename one declaration to a fresh, previously unused name.",
         ("constant identity", "environment insertion", "name interning"),
         metamorphic_rename,
+    ),
+    "metamorphic-delta": Campaign(
+        "metamorphic-delta", "guaranteed-accept",
+        "Unfold a definition into its uses, change its reducibility hints, or retag a theorem/opaque as a definition.",
+        ("lazy delta reduction", "reducibility hints", "definitional unfolding"),
+        metamorphic_delta,
     ),
     "expression-unsharing": Campaign(
         "expression-unsharing", "guaranteed-accept",
