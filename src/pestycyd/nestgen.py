@@ -7,7 +7,8 @@ types, optionally indexed by ``Bool``, whose fields nest the block through
 over ``Vec`` (the nested occurrence under a binder, indexed by the bound
 variable) and four containers declared in the module: ``Rose`` (itself
 nested), ``Pair2`` (a structure over ``List``), ``Vec`` (indexed) and
-``Wrap`` (reflexive), up to three containers deep.
+``Wrap`` (reflexive), plus the mutual pair ``EL``/``OL``, up to three
+containers deep.
 Lean derives ``SizeOf`` for the block through its recursors, one motive per
 nested auxiliary type, so
 
@@ -40,8 +41,11 @@ PRELUDE = {
     "Pair2": "structure Pair2 (α : Type u) (β : Type u) where\n  fst : α\n  snd : List β",
     "Vec": "inductive Vec (α : Type u) : Nat → Type u where\n  | nil : Vec α 0\n  | cons : α → Vec α n → Vec α (n + 1)",
     "Wrap": "inductive Wrap (α : Type u) : Type u where\n  | none\n  | one : α → Wrap α\n  | many : (Bool → Wrap α) → Wrap α",
+    # A mutual container: nesting through either member copies the whole block.
+    "EL": "mutual\ninductive EL (α : Type u) where\n  | nil : EL α\n  | cons : α → OL α → EL α\n"
+          "inductive OL (α : Type u) where\n  | cons : α → EL α → OL α\nend",
 }
-CONTAINERS = ("List", "Option", "Prod", "Array", "Rose", "Pair2", "Vec", "Wrap", "ULift", "Subtype", "Sigma")
+CONTAINERS = ("List", "Option", "Prod", "Array", "Rose", "Pair2", "Vec", "Wrap", "ULift", "Subtype", "Sigma", "EL", "OL")
 # A field type is a tuple: ("bool",), ("nat",), ("ref", T, index|None),
 # ("refl", ref) for Bool → ref, or (container, inner[, second]).
 FieldType = tuple
@@ -69,7 +73,7 @@ class Block:
         if r < 0.5 and depth == 0:
             return ("refl", self._ref())
         container = self.rng.choice(CONTAINERS)
-        self.used.update(("Vec",) if container == "Sigma" else (container,))
+        self.used.update({"Sigma": ("Vec",), "OL": ("EL",)}.get(container, (container,)))
         parts = [self._field(depth + 1, False) if self.rng.random() < 0.5 else self._ref()]
         if container in {"Prod", "Pair2"}:
             parts.append(self._field(depth + 1, False) if self.rng.random() < 0.5 else self._ref())
@@ -167,6 +171,11 @@ class Block:
             return f"⟨{first}, trivial⟩"
         if kind == "ULift":
             return f"(ULift.up {first})"
+        if kind == "OL":
+            return f"(OL.cons {first} EL.nil)"
+        if kind == "EL":
+            second = sub(ty[1]) if rng.random() < 0.6 else None
+            return f"(EL.cons {first} (OL.cons {second} EL.nil))" if second else f"(EL.cons {first} (OL.cons {first} EL.nil))"
         if kind == "Rose":
             kids = [f"(Rose.node {x} [])" for x in some(ty[1], (0, 1, 2))]
             return f"(Rose.node {first} [{', '.join(kids)}])"
@@ -234,6 +243,10 @@ class Block:
             elif kind in {"Subtype", "ULift"}:
                 pattern = "⟨a, _⟩" if kind == "Subtype" else "⟨a⟩"
                 arms = [f"  | {pattern} => {m(inner, 'a')}"]
+            elif kind == "OL":
+                arms = [f"  | .cons a e => 1 + {m(inner, 'a')} + {m(('EL', inner), 'e')}"]
+            elif kind == "EL":
+                arms = ["  | .nil => 0", f"  | .cons a o => 1 + {m(inner, 'a')} + {m(('OL', inner), 'o')}"]
             elif kind == "Rose":
                 arms = [f"  | .node a kids => 1 + {m(inner, 'a')} + {m(('List', ty), 'kids')}"]
             else:  # Wrap

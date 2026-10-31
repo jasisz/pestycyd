@@ -10,7 +10,7 @@ class NestgenTests(unittest.TestCase):
         for number in range(60):
             block = Block(rng, f"N{number}")
             text = block.header()
-            self.assertEqual("mutual" in text, len(block.types) > 1)
+            self.assertEqual("mutual" in block.declaration(), len(block.types) > 1)
             for name in PRELUDE:
                 self.assertEqual(f"inductive {name}" in text or f"structure {name}" in text, name in block.used)
 
