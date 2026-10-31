@@ -272,7 +272,8 @@ id = "lean4-16133-replay-mutual-order"
 why = """Reported as lean4#16133: Lean.Replay (leanchecker --from-export,
 lean4lean --import) adds a mutual block before constants that only a later
 member's type uses, when hash order reaches another member first; it then
-rejects a valid export with unknown constant."""
+rejects a valid export with unknown constant. Fixed on lean4 master by
+lean4#16138 (not in 4.35.0, nor in lean4lean's copy)."""
 kernels = ["official*", "paranoid*", "lean4lean*"]
 status = ["reject"]
 expected = ["accept"]

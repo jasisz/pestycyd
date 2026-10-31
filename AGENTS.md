@@ -88,7 +88,9 @@ pool for corpus seeds and known-bad cases.
 - `leanchecker --from-export`, `leanchecker-paranoid` and `lean4lean --import`
   reject valid exports with `unknown constant` when a mutual block's later
   member uses a constant in its type that no constructor mentions, and hash
-  order reaches an earlier member first (lean4#16133, `Lean/Replay.lean`).
+  order reaches an earlier member first (lean4#16133, `Lean/Replay.lean`;
+  fixed on lean4 master by #16138, still in 4.35.0 and in lean4lean's own
+  `Lean4Lean/Replay.lean` copy).
   The official verdict is then wrong: check `unknown constant` rejections
   against the export before trusting them as the expected status.
 - The same three reject valid exports that use `Quot.mk`/`Quot.lift`/`Quot.ind`
