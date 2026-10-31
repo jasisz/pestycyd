@@ -261,6 +261,25 @@ class TransformTests(unittest.TestCase):
         definition = document.mutated(retag).lines[-1]["def"]
         self.assertEqual((definition["hints"], definition["safety"], definition["value"]), ("opaque", "safe", 0))
 
+    def test_constant_retarget_swaps_same_typed_theorems(self) -> None:
+        def theorem(name: int) -> dict[str, object]:
+            return {"thm": {"all": [name], "levelParams": [], "name": name, "type": 0, "value": 1}}
+
+        document = Document(
+            (
+                META,
+                {"in": 1, "str": {"pre": 0, "str": "p"}},
+                {"in": 2, "str": {"pre": 0, "str": "q"}},
+                {"ie": 0, "sort": 0},
+                {"ie": 1, "bvar": 0},
+                theorem(1),
+                theorem(2),
+                {"ie": 2, "const": {"name": 2, "us": []}},
+            )
+        )
+        [mutation] = CAMPAIGNS["constant-retarget"].generate(document)
+        self.assertEqual((mutation.label, mutation.oracle, mutation.value), ("thm-to-thm", "guaranteed-accept", 1))
+
     def test_wrap_eta_skips_non_pi_types(self) -> None:
         document = Document(
             (

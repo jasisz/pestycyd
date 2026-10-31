@@ -438,6 +438,59 @@ def constant_name_splicing(document: Document) -> Iterable[Mutation]:
         candidates.append((name, line_no))
 
 
+def _declared_signatures(line: dict[str, object]) -> Iterable[tuple[int, str, object, tuple[object, ...]]]:
+    """``(name, kind, type, levelParams)`` for every constant a line declares."""
+    for kind in DECLARATION_KINDS:
+        payload = line.get(kind)
+        if isinstance(payload, dict) and _safe(kind, payload) and isinstance(payload.get("name"), int):
+            yield payload["name"], kind, payload.get("type"), tuple(payload.get("levelParams") or ())
+    block = line.get("inductive")
+    if isinstance(block, dict):
+        params = ()
+        types = block.get("types")
+        if isinstance(types, list) and types and isinstance(types[0], dict):
+            params = tuple(types[0].get("levelParams") or ())
+        for group in ("types", "ctors", "recs"):
+            for item in block.get(group) or ():
+                if isinstance(item, dict) and isinstance(item.get("name"), int):
+                    yield item["name"], group[:-1], item.get("type"), tuple(item.get("levelParams") or params)
+
+
+def constant_retarget(document: Document) -> Iterable[Mutation]:
+    """Point a constant occurrence at an earlier constant with the very same
+    declared type and universe parameters (after nano-lean's ``retarget``).
+
+    The result is still well formed and well scoped, so checkers get deep
+    into conversion before they can disagree.  A theorem's type is a
+    proposition, so whatever replaces it proves the same statement and
+    proof irrelevance makes the swap invisible: those mutants must be
+    accepted.
+    """
+    declared: dict[int, tuple[str, object, tuple[object, ...]]] = {}
+    by_signature: dict[tuple[object, tuple[object, ...]], list[int]] = {}
+    for line_no, line in enumerate(document.lines):
+        for name, kind, type_id, params in _declared_signatures(line):
+            if isinstance(type_id, int) and name not in declared:
+                declared[name] = (kind, type_id, params)
+                by_signature.setdefault((type_id, params), []).append(name)
+        const = line.get("const")
+        if not isinstance(const, dict) or const.get("name") not in declared:
+            continue
+        kind, type_id, params = declared[const["name"]]
+        if len(const.get("us") or ()) != len(params):
+            continue
+        others = [name for name in by_signature[(type_id, params)] if name != const["name"]]
+        # Swapped inductive types mostly fail at once: one is enough.
+        for other in others[-1:] if kind == "type" else others[-4:]:
+            other_kind = declared[other][0]
+            yield Mutation(
+                "constant-retarget", f"{kind}-to-{other_kind}",
+                "guaranteed-accept" if kind == "thm" else "differential",
+                line_no, ("const",), "name", other,
+                "same-typed constants: proof irrelevance and conversion",
+            )
+
+
 def recursor_rule_constant_splicing(document: Document) -> Iterable[Mutation]:
     """Cross-wire constants only inside imported recursor-rule right-hand sides."""
     expressions = {
@@ -2123,6 +2176,12 @@ CAMPAIGNS: dict[str, Campaign] = {
         "Replace constants with earlier occurrences having the same universe arity.",
         ("constant identity", "environment lookup", "reduction caches"),
         constant_name_splicing,
+    ),
+    "constant-retarget": Campaign(
+        "constant-retarget", "differential",
+        "Retarget a constant to an earlier one with the identical declared type; theorem swaps must be accepted.",
+        ("proof irrelevance", "conversion", "delta unfolding"),
+        constant_retarget,
     ),
     "recursor-rule-constant-splicing": Campaign(
         "recursor-rule-constant-splicing", "differential",

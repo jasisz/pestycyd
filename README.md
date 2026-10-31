@@ -339,7 +339,10 @@ its uses, changes its reducibility hints or retags a theorem or opaque
 constant as a definition (after [nano-lean](https://github.com/sdiehl/nano-lean)'s
 mutator), `expression-unsharing` rebuilds a shared value
 DAG as a private copy, and `declaration-reordering` moves a declaration past
-an independent neighbour — so any rejection is a completeness finding. The
+an independent neighbour — so any rejection is a completeness finding. `constant-retarget`
+points a constant occurrence at an earlier constant with the identical declared
+type; when the replaced constant is a theorem the swap is invisible under proof
+irrelevance and must be accepted, otherwise the checkers must merely agree. The
 rewrites are real graph transformations: inserted expression records force a
 dense renumbering of the whole export, which the `pestycyd.rewrite` core
 performs while rewriting every back-reference.
