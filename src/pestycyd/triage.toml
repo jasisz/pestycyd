@@ -347,13 +347,3 @@ kernels = ["lean4lean*", "pestka*"]
 status = ["accept"]
 expected = ["reject"]
 campaigns = ["intern-table-shadowing"]
-
-[[rule]]
-id = "tenet-quot-needs-all-four"
-why = """tenet enables quotient reduction only when Quot, Quot.mk, Quot.lift and
-Quot.ind are all declared; corpus/real/slice-d1 lacks Quot.ind (a slicing
-artefact), so tenet rejects funext there. Real exports carry all four."""
-kernels = ["tenet*"]
-status = ["reject"]
-expected = ["accept"]
-output = "declaration type mismatch for 'funext'"
