@@ -254,6 +254,9 @@ class Generated:
     fold: int | None = None  # None for the True-motive (Prop) form
     # Further theorem results (exact literal values) to shift, one reject each.
     results: tuple[int, ...] = ()
+    # A rewritten export: a further accept when ``forged_valid``, else a reject.
+    forged: str | None = None
+    forged_valid: bool = False
 
     def shifted(self) -> str | None:
         """The export with the theorem's result literal off by one."""
@@ -266,7 +269,13 @@ class Generated:
         if self.export is None:
             return []
         bumped = [self.shifted()] + [self._bumped(value) for value in self.results]
+        if not self.forged_valid:
+            bumped.append(self.forged)
         return [text for text in bumped if text is not None]
+
+    def accepts(self) -> list[str]:
+        """Exports besides ``export`` that every checker must accept."""
+        return [self.forged] if self.forged is not None and self.forged_valid else []
 
     def _bumped(self, value: int) -> str | None:
         assert self.export is not None

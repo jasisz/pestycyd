@@ -194,7 +194,9 @@ def generate_nested(
 def generate_props(
     _config: Config | None, _kernels: tuple[KernelSpec, ...], args: argparse.Namespace
 ) -> int:
-    return _write_generated(propgen.generate(args.count, args.seed, args.lean, args.leanexport, args.workers), args)
+    return _write_generated(
+        propgen.generate(args.count, args.seed, args.lean, args.leanexport, args.workers, args.forged), args
+    )
 
 
 def _write_generated(results: list[indgen.Generated], args: argparse.Namespace) -> int:
@@ -210,11 +212,13 @@ def _write_generated(results: list[indgen.Generated], args: argparse.Namespace) 
         kept += 1
         atomic_text(args.output / f"{result.name}.lean", result.lean)
         atomic_text(args.output / f"{result.name}.ndjson", result.export)
+        for number, text in enumerate(result.accepts()):
+            atomic_text(args.output / f"{result.name}-variant{number}.ndjson", text)
         for number, wrong in enumerate(result.rejects()):
             shifted += 1
             rejects.mkdir(exist_ok=True)
             atomic_text(rejects / f"{result.name}{f'-{number}' if number else ''}.ndjson", wrong)
-    extra = f" ({shifted} off-by-one rejects under {rejects})" if shifted else ""
+    extra = f" ({shifted} must-reject variants under {rejects})" if shifted else ""
     print(f"generated {kept} of {len(results)} families into {args.output}{extra}")
     for reason, count in sorted(dropped.items(), key=lambda item: -item[1]):
         print(f"  dropped {count} × {reason}")
@@ -1130,6 +1134,11 @@ def parser() -> argparse.ArgumentParser:
         generator.add_argument("--lean", default="lean", help="lean executable (needs Init)")
         generator.add_argument("--leanexport", default="leanexport")
         generator.add_argument("--workers", type=int, default=None)
+        if name == "props":
+            generator.add_argument(
+                "--forged", action="store_true",
+                help="also serialize each single family with a large recursor (must reject unless Lean grants it)",
+            )
         generator.set_defaults(function=function, no_config=True)
 
     command = sub.add_parser("matrix", help="run inputs through a kernel matrix")

@@ -297,7 +297,14 @@ equation and recursive fields, `Bool`/`Nat`/`Prop`/universe-valued indices,
 and mutual blocks. Lean's elaborator refuses `Sort u` families, so the
 generated modules set `bootstrap.inductiveCheckResultingUniverse false` and
 leave the decision to the kernel. Every checker must derive the recursor
-Lean exported; there is no theorem and no `rejects/`. Its first run found
+Lean exported; there is no theorem and no `rejects/`. With `--forged`, each
+single family is also declared a second time, renamed and in a sort that is
+never zero, so Lean derives a large recursor for the twin and elaborates
+`use : T … → Type` through it. Renaming the twin onto `T` gives an export
+whose `T.rec` eliminates into every universe: if Lean gave `T` a large
+eliminator itself, this is `T`'s real recursor (`-variant0.ndjson`, must
+accept, a check on the rewrite); otherwise it is forged (`rejects/`, must
+reject — accepting it, `use` reads data out of a proof). Its first run found
 [lean4#16133](https://github.com/leanprover/lean4/issues/16133): the
 reference replay adds a mutual block before constants used only by a later
 member's type, so `leanchecker --from-export` and `lean4lean` reject valid
