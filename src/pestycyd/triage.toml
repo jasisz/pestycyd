@@ -255,3 +255,14 @@ reaches first (hash order), the rest validate every record. Which one is
 kernels = ["*"]
 status = ["accept", "reject", "crash", "decline"]
 labels = ["types-*-levels-*"]
+
+[[rule]]
+id = "lean4-16133-replay-mutual-order"
+why = """Reported as lean4#16133: Lean.Replay (leanchecker --from-export,
+lean4lean --import) adds a mutual block before constants that only a later
+member's type uses, when hash order reaches another member first; it then
+rejects a valid export with unknown constant."""
+kernels = ["official*", "paranoid*", "lean4lean*"]
+status = ["reject"]
+expected = ["accept"]
+output = "unknown constant"

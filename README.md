@@ -290,6 +290,19 @@ The same flags apply; `rejects/` holds one off-by-one copy per theorem. Its firs
 [nanobruijn#2](https://github.com/nomeata/nanobruijn/issues/2): a valid
 mutual block with one non-recursive member panics nanobruijn.
 
+`generate props` aims at the elimination-level decision. Its families may
+live in `Prop` or in a sort that is zero only for some universes
+(`Sort u`, `Sort (imax u v)`, `Sort (max u v)`, …), with proof, data,
+equation and recursive fields, `Bool`/`Nat`/`Prop`/universe-valued indices,
+and mutual blocks. Lean's elaborator refuses `Sort u` families, so the
+generated modules set `bootstrap.inductiveCheckResultingUniverse false` and
+leave the decision to the kernel. Every checker must derive the recursor
+Lean exported; there is no theorem and no `rejects/`. Its first run found
+[lean4#16133](https://github.com/leanprover/lean4/issues/16133): the
+reference replay adds a mutual block before constants used only by a later
+member's type, so `leanchecker --from-export` and `lean4lean` reject valid
+exports, depending on hash order.
+
 The structural campaigns from Pestka's `arena-candidate` branch were ported as
 `expression-structure`, `declaration-structure`, and `inductive-structure`.
 `expression-structure` truncates at the affected declaration for isolated

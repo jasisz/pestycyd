@@ -18,7 +18,7 @@ from .bench import run_bench
 from .efficacy import run_efficacy
 from .campaigns import CAMPAIGNS, selected as selected_campaigns
 from .config import Config, KernelSpec, load_config
-from . import indgen, nestgen
+from . import indgen, nestgen, propgen
 from .generators import app_spine, con_k_params, deep_binder
 from .locate import declarations, first_refusal, prefix
 from .minimize import ddmin, well_formed_export
@@ -191,14 +191,20 @@ def generate_nested(
     return _write_generated(nestgen.generate(args.count, args.seed, args.lean, args.leanexport, args.workers), args)
 
 
+def generate_props(
+    _config: Config | None, _kernels: tuple[KernelSpec, ...], args: argparse.Namespace
+) -> int:
+    return _write_generated(propgen.generate(args.count, args.seed, args.lean, args.leanexport, args.workers), args)
+
+
 def _write_generated(results: list[indgen.Generated], args: argparse.Namespace) -> int:
     rejects = args.output / "rejects"
-    rejects.mkdir(parents=True, exist_ok=True)
+    args.output.mkdir(parents=True, exist_ok=True)
     dropped: dict[str, int] = {}
     kept = shifted = 0
     for result in results:
         if result.export is None:
-            reason = re.sub(r"^\S+:\d+:\d+: ", "", result.error)[:100]
+            reason = re.sub(r"Pestycyd\w+(\.\w+)*", "…", re.sub(r"^\S+:\d+:\d+: ", "", result.error))[:100]
             dropped[reason] = dropped.get(reason, 0) + 1
             continue
         kept += 1
@@ -206,11 +212,10 @@ def _write_generated(results: list[indgen.Generated], args: argparse.Namespace) 
         atomic_text(args.output / f"{result.name}.ndjson", result.export)
         for number, wrong in enumerate(result.rejects()):
             shifted += 1
+            rejects.mkdir(exist_ok=True)
             atomic_text(rejects / f"{result.name}{f'-{number}' if number else ''}.ndjson", wrong)
-    print(
-        f"generated {kept} of {len(results)} families into {args.output} "
-        f"({shifted} off-by-one rejects under {rejects})"
-    )
+    extra = f" ({shifted} off-by-one rejects under {rejects})" if shifted else ""
+    print(f"generated {kept} of {len(results)} families into {args.output}{extra}")
     for reason, count in sorted(dropped.items(), key=lambda item: -item[1]):
         print(f"  dropped {count} × {reason}")
     return 0 if kept else 1
@@ -1115,6 +1120,8 @@ def parser() -> argparse.ArgumentParser:
          "random inductive families elaborated by Lean, with fold theorems and off-by-one rejects"),
         ("nested", generate_nested,
          "random mutual blocks nested through containers, with sizeOf theorems and off-by-one rejects"),
+        ("props", generate_props,
+         "random families whose sort may be Prop (Sort u, imax, max), checking the elimination level"),
     ):
         generator = generators.add_parser(name, help=help_text)
         generator.add_argument("output", type=Path)

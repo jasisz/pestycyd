@@ -85,6 +85,12 @@ pool for corpus seeds and known-bad cases.
   recomputes `isRec` per type, Lean flags the whole block. Reported as
   nanobruijn#2; upstream nanoda fixed it silently in 05024bd. About 30% of
   `generate nested` seeds hit it, so expect it in `nested` hunts.
+- `leanchecker --from-export`, `leanchecker-paranoid` and `lean4lean --import`
+  reject valid exports with `unknown constant` when a mutual block's later
+  member uses a constant in its type that no constructor mentions, and hash
+  order reaches an earlier member first (lean4#16133, `Lean/Replay.lean`).
+  The official verdict is then wrong: check `unknown constant` rejections
+  against the export before trusting them as the expected status.
 - lean4lean validates the *bodies* of Nat primitives (`invalid form for
   primitive def Nat.gcd`) through Init helpers it looks up by name (`ite`,
   `HMod.hMod`, `OfNat.ofNat`, `rfl`, `WellFounded.Nat.fix`, `Bool.casesOn`,
