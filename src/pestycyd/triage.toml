@@ -194,7 +194,7 @@ kernels = ["nanoclo*"]
 status = ["accept"]
 expected = ["reject"]
 sites = ["inductive.recs.rules.rhs"]
-labels = ["lam-type-*", "lam-*-from-*", "block-*-rec-*-rule-*-rhs"]
+labels = ["lam-type-*", "lam-*-from-*", "block-*-rec-*-rule-*-rhs", "block-*-rec-*-rule-*-into-rec-*-rule-*"]
 reference = "Invalid recursor"
 
 [[rule]]
@@ -244,3 +244,14 @@ re-derives and accepts). con-* decline blocks whose records disagree."""
 kernels = ["sokonanoda*", "con-*"]
 status = ["accept", "reject", "decline"]
 labels = ["types-*-numParams-*"]
+
+[[rule]]
+id = "block-levelparams-from-one-record"
+why = """When one type record of a mutual block declares different universe
+parameters, checkers read the block's parameters from different records:
+sokonanoda from the first, the reference replay from whichever member it
+reaches first (hash order), the rest validate every record. Which one is
+"right" is not a kernel question; each checker stays self-consistent."""
+kernels = ["*"]
+status = ["accept", "reject", "crash", "decline"]
+labels = ["types-*-levels-*"]
