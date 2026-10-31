@@ -115,6 +115,16 @@ pool for corpus seeds and known-bad cases.
   renaming `And` makes them reject `theorem-reduction.ndjson`. Documented.
 - `namespace-shuffle` rediscovers lean4#16133 and lean4#15643 unaided; triage
   overturns official's verdict when a rule with `expected` explains it.
+- nano-lean (`nl-fast`, `nl-ref`, `nl-fast --term-core`; sdiehl/nano-lean,
+  binaries in /private/tmp/nano-lean-bin) is exact on all 613 level probes
+  (official rejects 50 semantically equal pairs), rejects forged data-type
+  rules and false theorems they would prove, and passes its own
+  `derivecheck` build on every corpus input. It is stricter than the
+  reference on export metadata (`all` groups, counts, omitted recursors).
+- nanoda master accepts serialized recursor rules equal to the derived ones
+  up to definitional equality, including structure eta: a minor nobody
+  reaches (the inner recursor's major is a fieldless structure) may be
+  anything. Forged rules that change a computed value are still refused.
 - pestka and lean4lean both resolve re-bound intern ids first-binding-wins
   (`intern-table-shadowing`); con-* decline them, nanoda panics.
 - `leanchecker --from-export` is the reference oracle: Pestka has exact

@@ -151,8 +151,9 @@ reference = "Invalid recursor"
 id = "omitted-recursor-strictness"
 why = """With a recursor left out of the block the reference derives it and
 accepts; con-*, the nanoda family (coverage check from nanoda PR #65), tenet
-and kefir require every recursor to be serialized. Stricter than reference."""
-kernels = ["con-*", "nanoda*", "nanoclo*", "nanobruijn*", "tenet*", "kefir*"]
+kefir and nano-lean require every recursor to be serialized. Stricter than
+reference."""
+kernels = ["con-*", "nanoda*", "nanoclo*", "nanobruijn*", "tenet*", "kefir*", "nano-lean*"]
 status = ["reject", "crash", "decline"]
 expected = ["accept"]
 sites = ["inductive.recs"]
@@ -161,9 +162,9 @@ sites = ["inductive.recs"]
 id = "official-rederives-inductive-metadata"
 why = """The reference kernel re-derives types[].all, numNested, numIndices,
 numParams, isRec and isReflexive and accepts wrong serialized values; pestka,
-the nanoda family, tenet and kefir validate them (stricter than reference),
-nanoda additionally refuses values beyond u16 at parse time (AGENTS.md)."""
-kernels = ["pestka*", "nanoda*", "nanoclo*", "nanobruijn*", "tenet*", "kefir*"]
+the nanoda family, tenet, kefir and nano-lean validate them (stricter than
+reference), nanoda additionally refuses values beyond u16 at parse time."""
+kernels = ["pestka*", "nanoda*", "nanoclo*", "nanobruijn*", "tenet*", "kefir*", "nano-lean*"]
 status = ["reject", "crash"]
 expected = ["accept"]
 sites = [
@@ -312,3 +313,37 @@ decline (documented scope, not a verdict)."""
 kernels = ["con-*"]
 status = ["decline"]
 output = "non-standard axiom"
+
+[[rule]]
+id = "rule-rhs-up-to-defeq"
+why = """nano-lean and the nanoda family check a serialized recursor rule against
+the derived one up to definitional equality (eta, lambda domains); the
+reference compares them syntactically (Invalid recursor). Mutants such as an
+eta-reduced rule body are inert: both forms give the same iota reduct. Rules
+that compute differently are still rejected (probed with swapped rules on a
+data type)."""
+kernels = ["nano-lean*", "nanoda*", "nanoclo*"]
+status = ["accept"]
+expected = ["reject"]
+sites = ["inductive.recs.rules.rhs*"]
+reference = "Invalid recursor"
+
+[[rule]]
+id = "nano-lean-strict-export-schema"
+why = """nano-lean validates what the reference ignores or re-derives: a
+declaration's `all` group, counts that must be small, duplicate table indices
+and universe parameters, and declines bound variables beyond its index range.
+Stricter than reference, no verdict on the kernel question."""
+kernels = ["nano-lean*"]
+status = ["reject", "decline"]
+expected = ["accept", "reject"]
+output = "invalid declaration group metadata|expected small nonnegative count|duplicate (index|universe parameter)|bound variable index too large|incorrect (inductive|recursor)( index count| count| metadata| recursion metadata)|incorrect inductive metadata"
+
+[[rule]]
+id = "intern-table-first-binding-wins"
+why = """A re-bound intern id: pestka and lean4lean resolve it first-binding-wins
+and may accept, the reference rejects, con-* decline, nanoda panics (AGENTS.md)."""
+kernels = ["lean4lean*", "pestka*"]
+status = ["accept"]
+expected = ["reject"]
+campaigns = ["intern-table-shadowing"]
