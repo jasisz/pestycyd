@@ -273,6 +273,19 @@ uv run pestycyd matrix /tmp/gen/*.ndjson /tmp/gen/rejects/*.ndjson
 uv run pestycyd hunt --campaign single-fault --campaign inductive-structure /tmp/gen
 ```
 
+`generate nested` goes where hand-written recursor applications cannot:
+mutual blocks of one to three types, optionally `Bool`-indexed, whose fields
+nest the block up to three containers deep through `List`, `Option`, `×`,
+`Array` and four containers declared alongside (`Rose`, itself nested;
+`Pair2`, a structure over `List`; `Vec`, indexed; `Wrap`, reflexive). The
+theorem is `Nat.add 1000000 (sizeOf term) = 1000000 + N := rfl`: Lean
+derives `SizeOf` through the block's recursors, one motive per nested
+auxiliary type, so a checker must get every auxiliary recursor right. `N`
+comes from the elaborator's `#reduce`, and Lean's kernel checks the theorem
+before export. The same flags and `rejects/` apply. Its first run found
+[nanobruijn#2](https://github.com/nomeata/nanobruijn/issues/2): a valid
+mutual block with one non-recursive member panics nanobruijn.
+
 The structural campaigns from Pestka's `arena-candidate` branch were ported as
 `expression-structure`, `declaration-structure`, and `inductive-structure`.
 `expression-structure` truncates at the affected declaration for isolated

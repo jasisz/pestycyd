@@ -214,3 +214,13 @@ status = ["accept"]
 expected = ["reject"]
 reference = "undefined universe level parameter"
 sites = ["inductive.types.type", "inductive.ctors.type", "inductive.recs.*"]
+
+[[rule]]
+id = "nanobruijn-2-mutual-isrec"
+why = """Reported as nanobruijn#2: nanobruijn recomputes isRec from one type's
+constructors, Lean flags the whole mutual block (upstream nanoda 05024bd), so
+a valid block with a non-recursive member panics."""
+kernels = ["nanoda", "nanobruijn*"]
+status = ["crash", "reject"]
+expected = ["accept"]
+output = 'inductive\.rs:\d+:\d+:\s*\nassertion `left == right` failed\s*\n\s*left: true\s*\n\s*right: false'

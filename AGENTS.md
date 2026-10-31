@@ -80,6 +80,11 @@ pool for corpus seeds and known-bad cases.
   swap (43/43 in the generated-seed hunt). Inert, same family as the
   withdrawn nanoda #76 / sokonanoda #11 reports. Left untriaged on purpose:
   a rule cannot yet tell `Prop` from `Type` recursors.
+- nanobruijn (`nanoda` in `.pestycyd/all-checkers.toml`) panics at
+  `inductive.rs:32` on every mutual block with a non-recursive member: it
+  recomputes `isRec` per type, Lean flags the whole block. Reported as
+  nanobruijn#2; upstream nanoda fixed it silently in 05024bd. About 30% of
+  `generate nested` seeds hit it, so expect it in `nested` hunts.
 - lean4lean validates the *bodies* of Nat primitives (`invalid form for
   primitive def Nat.gcd`) through Init helpers it looks up by name (`ite`,
   `HMod.hMod`, `OfNat.ofNat`, `rfl`, `WellFounded.Nat.fix`, `Bool.casesOn`,
