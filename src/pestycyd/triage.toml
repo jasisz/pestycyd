@@ -261,11 +261,13 @@ id = "lean4-15643-replay-quot"
 why = """Reported as lean4#15643 (also lean4lean#66): leanchecker --from-export
 erases Quot.mk/lift/ind from the replay map, so a declaration that uses them
 without mentioning Quot is replayed before the quotient exists whenever name
-order has not reached Quot yet; it then rejects a valid export."""
+order has not reached Quot yet; it then rejects a valid export. The same
+issue's String.ofList case (and Char.ofNat): the kernel expands string
+literals through constants the replayed value never names."""
 kernels = ["official*", "paranoid*", "lean4lean*"]
 status = ["reject"]
 expected = ["accept"]
-output = "unknown constant '?Quot\\.(mk|lift|ind)"
+output = "unknown constant '?(Quot\\.(mk|lift|ind)|String\\.ofList|Char\\.ofNat)'"
 
 [[rule]]
 id = "lean4-16133-replay-mutual-order"
@@ -301,3 +303,12 @@ status = ["reject"]
 expected = ["accept"]
 campaigns = ["namespace-shuffle"]
 output = "type mismatch in theorem"
+
+[[rule]]
+id = "con-axioms-by-name"
+why = """con-leche/con-ron decline any axiom outside the standard three, which
+they recognize by name: renaming Classical.choice/propext/Quot.sound makes them
+decline (documented scope, not a verdict)."""
+kernels = ["con-*"]
+status = ["decline"]
+output = "non-standard axiom"
