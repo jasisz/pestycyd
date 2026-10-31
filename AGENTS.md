@@ -125,6 +125,10 @@ pool for corpus seeds and known-bad cases.
   up to definitional equality, including structure eta: a minor nobody
   reaches (the inner recursor's major is a fieldless structure) may be
   anything. Forged rules that change a computed value are still refused.
+- tenet only reduces `Quot.lift` once the export declares all four quotient
+  constants. `corpus/real/slice-d1.ndjson` lacks `Quot.ind` (our slicing
+  dropped it; lean4export always emits all four), so tenet rejects `funext`
+  there and on every mutant of it. Not a tenet bug on real exports.
 - pestka and lean4lean both resolve re-bound intern ids first-binding-wins
   (`intern-table-shadowing`); con-* decline them, nanoda panics.
 - `leanchecker --from-export` is the reference oracle: Pestka has exact
