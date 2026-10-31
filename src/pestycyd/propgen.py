@@ -40,9 +40,11 @@ TWIN = "PestycydTwin"
 
 
 class Family:
-    def __init__(self, rng: random.Random, name: str) -> None:
-        self.rng, self.name = rng, name
-        self.mutual = rng.random() < 0.3
+    def __init__(self, rng: random.Random, name: str, boundary: bool = False) -> None:
+        """``boundary`` favours what Lean only eliminates into ``Prop``
+        (single types, two constructors, data fields): forged recursors."""
+        self.rng, self.name, self.boundary = rng, name, boundary
+        self.mutual = not boundary and rng.random() < 0.3
         self.sort = rng.choice(SORTS)
         self.params = rng.sample(PARAMS, rng.choice((0, 1, 1, 2, 3)))
         self.names = {param for param, _ in self.params}
@@ -72,7 +74,7 @@ class Family:
         return None  # α: only a field can supply one
 
     def field_type(self, fields: list[tuple[str, str]]) -> str | None:
-        kind = self.rng.choice(("proof", "data", "data", "rec", "eq"))
+        kind = self.rng.choice(("proof", "data", "data", "data", "rec") if self.boundary else ("proof", "data", "data", "rec", "eq"))
         if kind == "proof":
             return self.rng.choice(("True", "p" if "p" in self.names else "True", "1 = 1"))
         if kind == "data":
@@ -87,7 +89,7 @@ class Family:
     def _ctors(self, t: str) -> list[str]:
         """Constructor types, as Lean text over the block's type names."""
         ctors = []
-        for _ in range(self.rng.choice((0, 1, 1, 1, 2))):
+        for _ in range(self.rng.choice((1, 2, 2) if self.boundary else (0, 1, 1, 1, 2))):
             fields: list[tuple[str, str]] = []
             for j in range(self.rng.choice((0, 1, 2, 3))):
                 ty = self.field_type(fields)
@@ -224,7 +226,7 @@ def generate(
     forged: bool = False,
 ) -> list[Generated]:
     rng = random.Random(seed)
-    families = [Family(rng, f"PestycydProp{seed}x{number}") for number in range(count)]
+    families = [Family(rng, f"PestycydProp{seed}x{number}", boundary=forged) for number in range(count)]
     prefix = _lean_prefix(lean)
     with ThreadPoolExecutor(max_workers=workers or os.cpu_count() or 4) as pool:
         return list(pool.map(lambda family: elaborate(family, lean, leanexport, prefix, forged), families))
