@@ -72,6 +72,13 @@ class IndgenTests(unittest.TestCase):
         self.assertEqual(values, [None, str(OFFSET + 5), "4"])
         self.assertIsNone(Generated("G", "", export, fold=None).shifted())
 
+    def test_rejects_bump_each_theorem_result_once(self) -> None:
+        lines = [{"ie": 0, "natVal": str(OFFSET + 4)}, {"ie": 1, "natVal": "2000009"}]
+        export = "".join(json.dumps(line) + "\n" for line in lines)
+        rejects = Generated("G", "", export, fold=4, results=(2000009, 77)).rejects()
+        values = [[json.loads(line)["natVal"] for line in text.splitlines()] for text in rejects]
+        self.assertEqual(values, [[str(OFFSET + 5), "2000009"], [str(OFFSET + 4), "2000010"]])
+
 
 if __name__ == "__main__":
     unittest.main()

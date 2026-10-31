@@ -282,7 +282,11 @@ theorem is `Nat.add 1000000 (sizeOf term) = 1000000 + N := rfl`: Lean
 derives `SizeOf` through the block's recursors, one motive per nested
 auxiliary type, so a checker must get every auxiliary recursor right. `N`
 comes from the elaborator's `#reduce`, and Lean's kernel checks the theorem
-before export. The same flags and `rejects/` apply. Its first run found
+before export. A second theorem `fold` evaluates a mutual group of
+structurally recursive functions, one per block type and per nested
+container, so the check also runs through `brecOn`/`below`; about a third of
+the blocks live in `Type u`, making both theorems universe-polymorphic.
+The same flags apply; `rejects/` holds one off-by-one copy per theorem. Its first run found
 [nanobruijn#2](https://github.com/nomeata/nanobruijn/issues/2): a valid
 mutual block with one non-recursive member panics nanobruijn.
 

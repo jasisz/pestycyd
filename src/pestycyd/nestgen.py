@@ -13,7 +13,10 @@ nested auxiliary type, so
 
 drives a checker through every auxiliary recursor at once.  ``N`` comes
 from ``#reduce`` (the elaborator's whnf, not the kernel); the theorem is then
-compiled, so Lean's kernel confirms it before the module is exported.
+compiled, so Lean's kernel confirms it before the module is exported.  A
+second theorem ``fold`` evaluates structurally recursive functions over the
+block (one per block type and nested container type), compiled by Lean
+through ``brecOn``/``below``.  Some blocks live in ``Type u``.
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .indgen import OFFSET, Generated, _lean_prefix
+
+FOLD_OFFSET = 2 * OFFSET
 
 PRELUDE = {
     "Rose": "inductive Rose (α : Type u) where\n  | node : α → List (Rose α) → Rose α",
@@ -45,6 +50,7 @@ class Block:
         self.rng, self.name = rng, name
         self.types = [f"T{i}" for i in range(rng.choice((1, 2, 2, 3)))]
         self.indexed = {t: rng.random() < 0.4 for t in self.types}
+        self.universe = rng.random() < 0.3
         self.used: set[str] = set()
         self.ctors = {t: self._ctors(t) for t in self.types}
 
@@ -78,28 +84,32 @@ class Block:
             ctors.append((fields, self.rng.choice(("true", "false")) if self.indexed[t] else None))
         return ctors
 
-    def show(self, ty: FieldType) -> str:
+    def show(self, ty: FieldType, levels: bool = False, length: str = "2") -> str:
+        """Lean syntax; ``levels`` spells the block's universe out (outside
+        the block itself), ``length`` is the ``Vec`` index."""
         kind = ty[0]
         if kind == "bool":
             return "Bool"
         if kind == "nat":
             return "Nat"
         if kind == "ref":
-            return f"{ty[1]} {ty[2]}" if ty[2] else ty[1]
+            head = f"{ty[1]}.{{u}}" if levels and self.universe else ty[1]
+            return f"{head} {ty[2]}" if ty[2] else head
         if kind == "refl":
-            return f"Bool → {self.show(ty[1])}"
+            return f"Bool → {self.show(ty[1], levels)}"
         if kind == "Prod":
-            return f"({self.show(ty[1])} × {self.show(ty[2])})"
+            return f"({self.show(ty[1], levels)} × {self.show(ty[2], levels)})"
         if kind == "Pair2":
-            return f"(Pair2 ({self.show(ty[1])}) ({self.show(ty[2])}))"
+            return f"(Pair2 ({self.show(ty[1], levels)}) ({self.show(ty[2], levels)}))"
         if kind == "Vec":
-            return f"(Vec ({self.show(ty[1])}) 2)"
-        return f"({kind} ({self.show(ty[1])}))"
+            return f"(Vec ({self.show(ty[1], levels)}) {length})"
+        return f"({kind} ({self.show(ty[1], levels)}))"
 
     def declaration(self) -> str:
         lines = []
         for t in self.types:
-            lines.append(f"inductive {t} : {'Bool → Type' if self.indexed[t] else 'Type'} where")
+            sort = "Type u" if self.universe else "Type"
+            lines.append(f"inductive {t} : {'Bool → ' if self.indexed[t] else ''}{sort} where")
             for number, (fields, index) in enumerate(self.ctors[t]):
                 parts = [f"(x{j} : {self.show(item)})" for j, item in enumerate(fields)]
                 lines.append(f"  | c{number} : {' → '.join([*parts, f'{t} {index}' if index else t])}")
@@ -151,8 +161,8 @@ class Block:
             return "Wrap.none"
         return f"(Wrap.one {first})" if r < 0.6 else f"(Wrap.many (fun b => if b then Wrap.one {first} else Wrap.none))"
 
-    def values(self, rounds: int = 30) -> list[str]:
-        """Closed terms bottom-up, grouped by type and index."""
+    def values(self, rounds: int = 30) -> list[tuple[str, str]]:
+        """Closed terms bottom-up as (type, term), grouped by type and index."""
         pool: dict[tuple[str, str | None], list[str]] = {}
         for _ in range(rounds):
             t = self.rng.choice(self.types)
@@ -161,16 +171,87 @@ class Block:
             args = [self.term(item, pool) for item in fields]
             if all(arg is not None for arg in args):
                 pool.setdefault((t, index), []).append(" ".join([f"{t}.c{number}", *args]))  # type: ignore[list-item]
-        return [value for values in pool.values() for value in values]
+        return [(self.show(("ref", *key), levels=True), value) for key, values in pool.items() for value in values]
+
+    # ---- structural recursion: one function per block type and per nested
+    # container type that mentions the block, all in one mutual group.
+    def mentions(self, ty: FieldType) -> bool:
+        if ty[0] in {"bool", "nat"}:
+            return False
+        return ty[0] in {"ref", "refl"} or any(self.mentions(part) for part in ty[1:])
+
+    def fold_name(self, ty: FieldType, defs: dict[str, str]) -> str:
+        """The function folding ``ty``, defining it (and its helpers) on first use."""
+        key = ty[1] if ty[0] == "ref" else self.show(ty, length="n")
+        if key in defs:
+            return defs[key].split()[1]
+        name = f"f{ty[1]}" if ty[0] == "ref" else f"h{len(defs)}"
+        defs[key] = f"def {name} "  # reserve the name before recursing
+        if ty[0] == "ref":
+            t = ty[1]
+            arms = []
+            for number, (fields, _) in enumerate(self.ctors[t]):
+                parts = [str(number + 1)] + [self.measure(item, f"x{j}", defs) for j, item in enumerate(fields)]
+                binders = "".join(f" x{j}" for j in range(len(fields)))
+                arms.append(f"  | {'_, ' if self.indexed[t] else ''}.c{number}{binders} => {' + '.join(parts)}")
+            head = self.show(("ref", t, "b" if self.indexed[t] else None), levels=True)
+            signature = f"{{b : Bool}} → {head}" if self.indexed[t] else head
+        else:
+            kind, inner = ty[0], ty[1]
+            m = lambda item, var: self.measure(item, var, defs)  # noqa: E731
+            signature = self.show(ty, levels=True, length="n")[1:-1]
+            if kind == "List":
+                arms = ["  | [] => 0", f"  | x :: xs => 1 + {m(inner, 'x')} + {name} xs"]
+            elif kind == "Option":
+                arms = ["  | none => 0", f"  | some x => 1 + {m(inner, 'x')}"]
+            elif kind == "Prod":
+                arms = [f"  | (a, b) => {m(inner, 'a')} + {m(ty[2], 'b')}"]
+            elif kind == "Array":
+                arms = [f"  | ⟨xs⟩ => 1 + {m(('List', inner), 'xs')}"]
+            elif kind == "Pair2":
+                arms = [f"  | ⟨a, bs⟩ => {m(inner, 'a')} + {m(('List', ty[2]), 'bs')}"]
+            elif kind == "Vec":
+                signature = f"{{n : Nat}} → {signature}"
+                arms = ["  | _, .nil => 0", f"  | _, .cons a v => 1 + {m(inner, 'a')} + {name} v"]
+            elif kind == "Rose":
+                arms = [f"  | .node a kids => 1 + {m(inner, 'a')} + {m(('List', ty), 'kids')}"]
+            else:  # Wrap
+                arms = ["  | .none => 0", f"  | .one a => {m(inner, 'a')}",
+                        f"  | .many k => 1 + {name} (k true) + {name} (k false)"]
+        defs[key] = "\n".join([f"def {name} : {signature} → Nat", *arms])
+        return name
+
+    def measure(self, ty: FieldType, var: str, defs: dict[str, str]) -> str:
+        kind = ty[0]
+        if kind == "bool":
+            return f"(if {var} then 1 else 0)"
+        if kind == "nat":
+            return var
+        if kind == "refl":
+            return f"{self.fold_name(ty[1], defs)} ({var} true)"
+        if not self.mentions(ty):
+            return "1"
+        return f"{self.fold_name(ty, defs)} {var}"
+
+    def folds(self, top: str) -> tuple[str, str]:
+        """The mutual fold group and the name of the function folding ``top``."""
+        defs: dict[str, str] = {}
+        name = self.fold_name(("ref", top, None), defs)
+        for t in self.types:
+            self.fold_name(("ref", t, None), defs)
+        body = "\n".join(defs.values())
+        return (f"mutual\n{body}\nend" if len(defs) > 1 else body), name
 
     def header(self) -> str:
         containers = "\n\n".join(text for name, text in PRELUDE.items() if name in self.used)
         return f"universe u\n\n{containers}\n\nnamespace {self.name}\n\n{self.declaration()}\n\n"
 
 
-def pick_major(values: list[str]) -> str:
-    major = max(values, key=len)
-    return major if len(major) <= 1500 else min(values, key=lambda value: abs(len(value) - 600))
+def pick_major(values: list[tuple[str, str]]) -> tuple[str, str]:
+    major = max(values, key=lambda item: len(item[1]))
+    if len(major[1]) <= 1500:
+        return major
+    return min(values, key=lambda item: abs(len(item[1]) - 600))
 
 
 def _compile(directory: str, module: str, text: str, lean: str) -> subprocess.CompletedProcess[str]:
@@ -187,33 +268,50 @@ def _first_line(result: subprocess.CompletedProcess[str]) -> str:
     return output.splitlines()[0] if output else "lean failed"
 
 
-def elaborate(block: Block, major: str, lean: str, leanexport: str, prefix: str) -> Generated:
+def elaborate(block: Block, major: tuple[str, str], lean: str, leanexport: str, prefix: str) -> Generated:
+    """sizeOf theorem ``use`` plus, when Lean accepts the folds, ``fold``."""
+    ty, term = major
+    top = ty.split()[0].split(".")[0]
+    folds, fold = block.folds(top)
     header, footer = block.header(), f"\nend {block.name}\n"
+    value = f"(({term} : {ty}))"
+    error = ""
     with tempfile.TemporaryDirectory(prefix="pestycyd-nestgen-") as directory:
-        probe = _compile(directory, block.name, f"{header}#reduce sizeOf ({major})\n{footer}", lean)
-        size = re.search(r"^(\d+)\s*$", probe.stdout, re.M)
-        if probe.returncode != 0 or size is None:
-            return Generated(block.name, header, None, _first_line(probe))
-        fold = int(size.group(1))
-        text = f"{header}theorem use : Nat.add {OFFSET} (sizeOf ({major})) = {OFFSET + fold} := rfl\n{footer}"
-        compiled = _compile(directory, block.name, text, lean)
-        if compiled.returncode != 0:
-            return Generated(block.name, text, None, _first_line(compiled))
-        exported = subprocess.run(
-            [leanexport, block.name, "--", f"{block.name}.use"],
-            capture_output=True, text=True, cwd=directory, timeout=300,
-            env={**os.environ, "LEAN_PATH": f"{directory}:{prefix}/lib/lean"},
-        )
-        if exported.returncode != 0:
-            return Generated(block.name, text, None, f"leanexport: {exported.stderr.strip()[:200]}")
-        return Generated(block.name, text, exported.stdout, fold=fold)
+        for with_folds in (True, False):
+            body = header + (f"{folds}\n\n" if with_folds else "")
+            probes = f"#reduce sizeOf {value}\n" + (f"#reduce {fold} {value}\n" if with_folds else "")
+            probe = _compile(directory, block.name, f"{body}{probes}{footer}", lean)
+            sizes = [int(n) for n in re.findall(r"^(\d+)\s*$", probe.stdout, re.M)]
+            if probe.returncode != 0 or len(sizes) != (2 if with_folds else 1):
+                error = _first_line(probe)
+                continue
+            text = body + f"theorem use : Nat.add {OFFSET} (sizeOf {value}) = {OFFSET + sizes[0]} := rfl\n"
+            names = [f"{block.name}.use"]
+            if with_folds:
+                text += f"\ntheorem fold : Nat.add {FOLD_OFFSET} ({fold} {value}) = {FOLD_OFFSET + sizes[1]} := rfl\n"
+                names.append(f"{block.name}.fold")
+            text += footer
+            compiled = _compile(directory, block.name, text, lean)
+            if compiled.returncode != 0:
+                error = _first_line(compiled)
+                continue
+            exported = subprocess.run(
+                [leanexport, block.name, "--", *names],
+                capture_output=True, text=True, cwd=directory, timeout=300,
+                env={**os.environ, "LEAN_PATH": f"{directory}:{prefix}/lib/lean"},
+            )
+            if exported.returncode != 0:
+                return Generated(block.name, text, None, f"leanexport: {exported.stderr.strip()[:200]}")
+            results = (FOLD_OFFSET + sizes[1],) if with_folds else ()
+            return Generated(block.name, text, exported.stdout, fold=sizes[0], results=results)
+    return Generated(block.name, header, None, error)
 
 
 def generate(
     count: int, seed: int, lean: str = "lean", leanexport: str = "leanexport", workers: int | None = None
 ) -> list[Generated]:
     rng = random.Random(seed)
-    jobs: list[tuple[Block, str]] = []
+    jobs: list[tuple[Block, tuple[str, str]]] = []
     attempts = 0
     while len(jobs) < count and attempts < count * 20:
         attempts += 1

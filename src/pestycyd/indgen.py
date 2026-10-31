@@ -252,17 +252,29 @@ class Generated:
     export: str | None
     error: str = ""
     fold: int | None = None  # None for the True-motive (Prop) form
+    # Further theorem results (exact literal values) to shift, one reject each.
+    results: tuple[int, ...] = ()
 
     def shifted(self) -> str | None:
         """The export with the theorem's result literal off by one."""
         if self.export is None or self.fold is None:
             return None
-        target = str(OFFSET + self.fold)
+        return self._bumped(OFFSET + self.fold)
+
+    def rejects(self) -> list[str]:
+        """One off-by-one export per theorem result."""
+        if self.export is None:
+            return []
+        bumped = [self.shifted()] + [self._bumped(value) for value in self.results]
+        return [text for text in bumped if text is not None]
+
+    def _bumped(self, value: int) -> str | None:
+        assert self.export is not None
         lines = [json.loads(line) for line in self.export.splitlines() if line.strip()]
-        hits = [line for line in lines if line.get("natVal") == target]
+        hits = [line for line in lines if line.get("natVal") == str(value)]
         if len(hits) != 1:
             return None
-        hits[0]["natVal"] = str(OFFSET + self.fold + 1)
+        hits[0]["natVal"] = str(value + 1)
         return Document(tuple(lines)).render()
 
 

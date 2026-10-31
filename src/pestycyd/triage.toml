@@ -194,7 +194,7 @@ kernels = ["nanoclo*"]
 status = ["accept"]
 expected = ["reject"]
 sites = ["inductive.recs.rules.rhs"]
-labels = ["lam-type-*", "lam-*-from-*"]
+labels = ["lam-type-*", "lam-*-from-*", "block-*-rec-*-rule-*-rhs"]
 reference = "Invalid recursor"
 
 [[rule]]
@@ -224,3 +224,23 @@ kernels = ["nanoda", "nanobruijn*"]
 status = ["crash", "reject"]
 expected = ["accept"]
 output = 'inductive\.rs:\d+:\d+:\s*\nassertion `left == right` failed\s*\n\s*left: true\s*\n\s*right: false'
+
+[[rule]]
+id = "nanoda-recursor-all-as-set"
+why = """The nanoda family compares a recursor's all list with the block's types
+as a set (parser same_names) and never reads it again; the reference kernel
+rejects a reordered list (Invalid recursor). Inert metadata."""
+kernels = ["nanoda*", "nanoclo*", "nanobruijn*"]
+status = ["accept"]
+expected = ["reject"]
+labels = ["recs-*-all-*-swap"]
+
+[[rule]]
+id = "sokonanoda-block-numparams"
+why = """sokonanoda takes one parameter count for the whole block from the first
+type record: a wrong numParams on a later type is ignored (the reference
+kernel rejects it), a wrong one on the first type is used (the reference
+re-derives and accepts). con-* decline blocks whose records disagree."""
+kernels = ["sokonanoda*", "con-*"]
+status = ["accept", "reject", "decline"]
+labels = ["types-*-numParams-*"]

@@ -204,10 +204,9 @@ def _write_generated(results: list[indgen.Generated], args: argparse.Namespace) 
         kept += 1
         atomic_text(args.output / f"{result.name}.lean", result.lean)
         atomic_text(args.output / f"{result.name}.ndjson", result.export)
-        wrong = result.shifted()
-        if wrong is not None:
+        for number, wrong in enumerate(result.rejects()):
             shifted += 1
-            atomic_text(rejects / f"{result.name}.ndjson", wrong)
+            atomic_text(rejects / f"{result.name}{f'-{number}' if number else ''}.ndjson", wrong)
     print(
         f"generated {kept} of {len(results)} families into {args.output} "
         f"({shifted} off-by-one rejects under {rejects})"
