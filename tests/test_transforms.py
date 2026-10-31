@@ -280,6 +280,26 @@ class TransformTests(unittest.TestCase):
         [mutation] = CAMPAIGNS["constant-retarget"].generate(document)
         self.assertEqual((mutation.label, mutation.oracle, mutation.value), ("thm-to-thm", "guaranteed-accept", 1))
 
+    def test_namespace_shuffle_renames_user_roots_only(self) -> None:
+        document = Document(
+            (
+                META,
+                {"in": 1, "str": {"pre": 0, "str": "Nat"}},
+                {"in": 2, "str": {"pre": 0, "str": "Foo"}},
+                {"in": 3, "str": {"pre": 2, "str": "bar"}},
+                {"ie": 0, "sort": 0},
+                {"ie": 1, "bvar": 0},
+                {"axiom": {"isUnsafe": False, "levelParams": [], "name": 1, "type": 0}},
+                def_line(3, 0, 1),
+            )
+        )
+        mutations = list(CAMPAIGNS["namespace-shuffle"].generate(document))
+        self.assertEqual(len(mutations), 4)
+        changed = document.mutated(mutations[0])
+        self.assertEqual(changed.lines[1]["str"]["str"], "Nat")
+        self.assertNotEqual(changed.lines[2]["str"]["str"], "Foo")
+        self.assertEqual(len({m.value for m in mutations}), 4)
+
     def test_wrap_eta_skips_non_pi_types(self) -> None:
         document = Document(
             (

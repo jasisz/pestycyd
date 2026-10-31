@@ -7,10 +7,11 @@ from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
 from .ndjson import Document, Edit, LineEdit, Mutation, Rewrite, walk_objects
-from .rewrite import TRUSTED_PRELUDE, _declared, _name_strings
+from .rewrite import TRUSTED_PRELUDE, _declared, _name_strings, prelude_lines
 from .transforms import (
     NONZERO_IMPOSTORS,
     SAFETY_FAULTS,
+    SENSITIVE_NAME_ROOTS,
     ZERO_DISGUISES,
     clonable_value,
     rename_safe,
@@ -1999,6 +2000,49 @@ def metamorphic_delta(document: Document) -> Iterable[Mutation]:
                 )
 
 
+SHUFFLE_VARIANTS = 4
+
+
+def namespace_shuffle(document: Document) -> Iterable[Mutation]:
+    """Rename every unprotected top-level namespace at once.
+
+    Rewriting the string of a root name record renames every name below it
+    consistently, so the export means the same; but every hash changes, and
+    with it the order in which a hash-ordered replay visits declarations
+    (lean4#16133 and lean4#15643 only showed for some names).  Roots that
+    checkers recognize by name stay: the trusted prelude, primitive
+    families, and every declaration a trusted primitive reaches.
+    """
+    lines = list(document.lines)
+    names = _name_strings(lines)
+    protected = set(SENSITIVE_NAME_ROOTS) | {name.split(".")[0] for name in TRUSTED_PRELUDE}
+    for line_no in prelude_lines(document):
+        protected.update(names.get(name, "").split(".")[0] for name in _declared(lines[line_no]))
+    used = {names.get(name, "").split(".")[0] for line in lines for name in _declared(line)}
+    strings = {line["str"]["str"] for line in lines if isinstance(line.get("str"), dict) and "str" in line["str"]}
+    roots = [
+        (line_no, line["str"]["str"]) for line_no, line in enumerate(lines)
+        if isinstance(line.get("in"), int) and isinstance(line.get("str"), dict)
+        and line["str"].get("pre") == 0 and line["str"].get("str") in used - protected
+    ]
+    if not roots:
+        return
+    for variant in range(SHUFFLE_VARIANTS):
+        edits = []
+        for index, (line_no, root) in enumerate(roots):
+            fresh = f"{root}{variant}q{index}"
+            while fresh in strings:
+                fresh += "q"
+            edits.append(Edit(line_no, ("str",), "str", fresh))
+        first, *rest = edits
+        yield Mutation(
+            "namespace-shuffle", f"roots-{len(roots)}-variant-{variant}", "guaranteed-accept",
+            first.line, first.path, first.field, first.value,
+            "consistent renaming of every namespace reorders hash-ordered replay",
+            edits=tuple(rest),
+        )
+
+
 def expression_unsharing(document: Document) -> Iterable[Mutation]:
     """Clone a shared value DAG into a private, structurally identical copy."""
     for line_no, kind in _typed_value_declarations(document):
@@ -2266,6 +2310,12 @@ CAMPAIGNS: dict[str, Campaign] = {
         "Unfold a definition into its uses, change its reducibility hints, or retag a theorem/opaque as a definition.",
         ("lazy delta reduction", "reducibility hints", "definitional unfolding"),
         metamorphic_delta,
+    ),
+    "namespace-shuffle": Campaign(
+        "namespace-shuffle", "guaranteed-accept",
+        "Rename every unprotected top-level namespace at once, reshuffling hash-ordered replay.",
+        ("declaration replay order", "name hashing", "environment insertion"),
+        namespace_shuffle,
     ),
     "expression-unsharing": Campaign(
         "expression-unsharing", "guaranteed-accept",

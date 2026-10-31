@@ -50,6 +50,18 @@ class TriageTests(unittest.TestCase):
         self.assertTrue(verdict.known)
         self.assertEqual(verdict.rule_ids, ("budget", "derived-rules"))
 
+    def test_a_known_reference_bug_overturns_the_expected_verdict(self) -> None:
+        results = {
+            "official": result("reject", "(kernel) unknown constant 'Bool'"),
+            "lean4lean": result("reject", "at T: (kernel) unknown constant 'Bool'"),
+            "nanoda": result("accept"),
+            "pestka-old": result("accept"),
+        }
+        verdict = triage(load_triage(), "namespace-shuffle", "roots-2-variant-0", "differential", results)
+        self.assertEqual(verdict.expected, "accept")
+        self.assertTrue(verdict.known)
+        self.assertEqual(verdict.rule_ids, ("lean4-16133-replay-mutual-order",))
+
     def test_a_deviation_outside_the_rule_sites_stays_unexplained(self) -> None:
         verdict = triage(
             self.rules,

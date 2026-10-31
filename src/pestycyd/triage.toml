@@ -289,3 +289,15 @@ kernels = ["nanoda*", "nanoclo*", "sokonanoda*"]
 status = ["reject", "decline", "crash"]
 expected = ["accept"]
 output = "expected u16"
+
+[[rule]]
+id = "con-opaque-theorems-and-by-name"
+why = """con-leche/con-ron never unfold theorem bodies (in anticipation of
+lean4#14896) and reduce recursors on stuck proofs only through a rescue keyed
+on the name `And` (pinned): renaming `And` breaks proofs that need a theorem
+unfolded under `And.rec`, which the reference accepts. Documented design."""
+kernels = ["con-*"]
+status = ["reject"]
+expected = ["accept"]
+campaigns = ["namespace-shuffle"]
+output = "type mismatch in theorem"

@@ -201,6 +201,14 @@ def triage(
     expected = expected_status(oracle, statuses)
     reference = results.get(REFERENCE_KERNEL, {})
     case = Case(campaign, label, expected, sites, str(reference.get("output") or ""))
+    trusted = statuses.get(REFERENCE_KERNEL)
+    if oracle not in {"guaranteed-accept", "guaranteed-reject"} and trusted == expected:
+        # The reference has known bugs too: a rule that names the opposite
+        # verdict as expected and explains the reference overturns it.
+        other = Case(campaign, label, "reject" if trusted == "accept" else "accept", sites, case.reference)
+        output = str(reference.get("output") or "")
+        if any(rule.expected and rule.explains(REFERENCE_KERNEL, trusted, output, other) for rule in rules):
+            expected, case = other.expected, other
     explained: dict[str, str] = {}
     unexplained: list[str] = []
     for name, status in sorted(statuses.items()):

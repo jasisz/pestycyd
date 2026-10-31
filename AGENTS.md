@@ -110,6 +110,11 @@ pool for corpus seeds and known-bad cases.
 - Hunt nano-lean's fixtures with `--finding-require-seed-change`:
   `primitives.ndjson` (lean4#15643) and `forged-nat-add.ndjson` (a forged
   `Nat.add` proving `False`) already diverge as seeds.
+- con-leche/con-ron treat theorem bodies as opaque and rescue `And.rec` on
+  stuck proofs by the *name* `And` (README, OVERVIEW §3): `namespace-shuffle`
+  renaming `And` makes them reject `theorem-reduction.ndjson`. Documented.
+- `namespace-shuffle` rediscovers lean4#16133 and lean4#15643 unaided; triage
+  overturns official's verdict when a rule with `expected` explains it.
 - pestka and lean4lean both resolve re-bound intern ids first-binding-wins
   (`intern-table-shadowing`); con-* decline them, nanoda panics.
 - `leanchecker --from-export` is the reference oracle: Pestka has exact
