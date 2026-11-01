@@ -25,3 +25,10 @@ incomplete for `imax`.
 On 2026-11-01 a run of 2000 pairs gave 637 unequal ones, which no checker
 and not Lean accepted, and 287 equal ones that Lean rejects; the latter
 became Arena `corner-cases/imax-nested-absorption` (lean-kernel-arena #320, merged).
+
+`subst.py` checks universe substitution: a polymorphic
+`Gk.{u,v} (x : Sort l1) : Sort l2 := x` is used twice in one body,
+`Hk.{u,v,w} (y : Sort m1) : Sort m2 := Gk.{c,d} (Gk.{a,b} y)`, where `m1`
+and `m2` are rewrites of the substituted levels, so the oracle knows whether
+`Hk` should type-check. 1500 cases on 2026-11-01: no checker accepted any of
+the 761 invalid ones.
