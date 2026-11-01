@@ -273,6 +273,10 @@ uv run pestycyd matrix /tmp/gen/*.ndjson /tmp/gen/rejects/*.ndjson
 uv run pestycyd hunt --campaign single-fault --campaign inductive-structure /tmp/gen
 ```
 
+For blocks built directly as kernel expressions, with their accepted
+constructors and recursors reused in later terms, see
+[`tools/kernel_gen/`](tools/kernel_gen/README.md).
+
 `generate nested` goes where hand-written recursor applications cannot:
 mutual blocks of one to three types, optionally `Bool`-indexed, whose fields
 nest the block up to three containers deep through `List`, `Option`, `×`,
