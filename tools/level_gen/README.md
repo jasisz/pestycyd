@@ -24,4 +24,4 @@ incomplete for `imax`.
 
 On 2026-11-01 a run of 2000 pairs gave 637 unequal ones, which no checker
 and not Lean accepted, and 287 equal ones that Lean rejects; the latter
-became Arena `corner-cases/imax-nested-absorption` (lean-kernel-arena #320).
+became Arena `corner-cases/imax-nested-absorption` (lean-kernel-arena #320, merged).
