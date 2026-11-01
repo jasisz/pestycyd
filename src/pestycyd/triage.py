@@ -255,12 +255,14 @@ def mutation_sites(lines: Sequence[dict[str, object]], mutation: Mapping[str, ob
         return frozenset()
     if path and path[0] in DECLARATION_ROOTS:
         return frozenset({_site(path, field)})
-    if not isinstance(line_no, int) or not 0 <= line_no < len(lines):
+    # Mutation.json() stores one-based file lines; Document.lines is zero-based.
+    if not isinstance(line_no, int) or not 1 <= line_no <= len(lines):
         return frozenset()
-    owner = _resolve(lines[line_no], path)
+    line = lines[line_no - 1]
+    owner = _resolve(line, path)
     if owner is None or field not in owner:
         return frozenset()  # the stored document no longer matches the mutation
-    target = declares_table_id(lines[line_no])
+    target = declares_table_id(line)
     if target is None:
         return frozenset({_site(path, field)})
     users: dict[tuple[str, int], list[tuple[int, tuple[object, ...], str]]] = defaultdict(list)

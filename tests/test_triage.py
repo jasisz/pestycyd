@@ -62,6 +62,20 @@ class TriageTests(unittest.TestCase):
         self.assertTrue(verdict.known)
         self.assertEqual(verdict.rule_ids, ("lean4-16133-replay-mutual-order",))
 
+    def test_missing_inductive_member_is_not_replay_order_bug(self) -> None:
+        results = {
+            "official": result("reject", "(kernel) unknown constant '_inhabitedExprDummy'"),
+            "pestka-old": result("reject"),
+            "sokonanoda": result("accept"),
+        }
+        verdict = triage(
+            load_triage(), "inductive-structure-full", "full-types-1-omit",
+            "differential", results, frozenset({"inductive.types"}),
+        )
+        self.assertEqual(verdict.expected, "reject")
+        self.assertTrue(verdict.known)
+        self.assertEqual(verdict.rule_ids, ("sokonanoda-derived-recursors",))
+
     def test_a_deviation_outside_the_rule_sites_stays_unexplained(self) -> None:
         verdict = triage(
             self.rules,
@@ -92,14 +106,14 @@ class TriageTests(unittest.TestCase):
             {"ie": 1, "lam": {"binderInfo": "default", "name": 0, "type": 0, "body": 0}},
             {"inductive": {"types": [], "ctors": [], "recs": [{"type": 0, "rules": [{"rhs": 1}]}]}},
         ]
-        rhs_only = {"line": 2, "path": ["lam"], "field": "body"}
+        rhs_only = {"line": 3, "path": ["lam"], "field": "body"}
         self.assertEqual(mutation_sites(lines, rhs_only), frozenset({"inductive.recs.rules.rhs"}))
-        shared = {"line": 1, "path": [], "field": "sort"}
+        shared = {"line": 2, "path": [], "field": "sort"}
         self.assertEqual(
             mutation_sites(lines, shared),
             frozenset({"inductive.recs.rules.rhs", "inductive.recs.type"}),
         )
-        direct = {"line": 3, "path": ["inductive", "recs", 0, "rules", 0], "field": "rhs"}
+        direct = {"line": 4, "path": ["inductive", "recs", 0, "rules", 0], "field": "rhs"}
         self.assertEqual(mutation_sites(lines, direct), frozenset({"inductive.recs.rules.rhs"}))
 
     def test_builtin_rules_load(self) -> None:

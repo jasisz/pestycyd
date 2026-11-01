@@ -234,7 +234,7 @@ rejects a reordered list (Invalid recursor). Inert metadata."""
 kernels = ["nanoda*", "nanoclo*", "nanobruijn*"]
 status = ["accept"]
 expected = ["reject"]
-labels = ["recs-*-all-*-swap"]
+labels = ["recs-*-all-*-swap", "full-recs-*-all-*-swap"]
 
 [[rule]]
 id = "sokonanoda-block-numparams"
@@ -244,7 +244,7 @@ kernel rejects it), a wrong one on the first type is used (the reference
 re-derives and accepts). con-* decline blocks whose records disagree."""
 kernels = ["sokonanoda*", "con-*"]
 status = ["accept", "reject", "decline"]
-labels = ["types-*-numParams-*"]
+labels = ["types-*-numParams-*", "full-types-*-numParams-*"]
 
 [[rule]]
 id = "block-levelparams-from-one-record"
@@ -255,7 +255,7 @@ reaches first (hash order), the rest validate every record. Which one is
 "right" is not a kernel question; each checker stays self-consistent."""
 kernels = ["*"]
 status = ["accept", "reject", "crash", "decline"]
-labels = ["types-*-levels-*"]
+labels = ["types-*-levels-*", "full-types-*-levels-*"]
 
 [[rule]]
 id = "lean4-15643-replay-quot"
@@ -280,7 +280,7 @@ lean4#16138 (not in 4.35.0, nor in lean4lean's copy)."""
 kernels = ["official*", "paranoid*", "lean4lean*"]
 status = ["reject"]
 expected = ["accept"]
-output = "unknown constant"
+output = "unknown constant '(?!_inhabitedExprDummy)"
 
 [[rule]]
 id = "nanoda-hints-height-u16"
