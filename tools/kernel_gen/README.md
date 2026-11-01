@@ -26,6 +26,12 @@ it, which Lean's positivity check accepts
 `corpus/leads/sokonanoda-nested-redex-merge.ndjson` was found (seed 913,
 `--blocks 300 --rec-terms 1200 --hide 50`).
 
+`--rich` gives polymorphic blocks two universe parameters with sorts such as
+`max u v + 1`, `imax v (u + 1)` or `max 1 (imax u v)`, parameters in either
+universe, and `Nat` indices (literal targets and `Vec`-style constructors
+`n → T n → T (n + 1)`) beside `Bool` ones. Three seeds of 400 blocks and 2500
+recursor attempts (2026-11-01, 1946 exports) found only known classes.
+
 The runner compiles the Lean modules, exports each selected declaration with
 `leanexport`, and writes a `summary.json`. It uses the local Lean 4.35.0
 toolchain by default when present; pass `--lean` for another installation.

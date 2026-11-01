@@ -8,7 +8,25 @@ structure Block where
   lparams : List Name
   nparams : Nat
   indexed : Bool
+  /-- With `indexed`: the index is a `Nat` rather than a `Bool`. -/
+  natIndex : Bool := false
   types : List InductiveType
+
+/-- Richer sorts over two universe parameters, for `--rich`. -/
+def richSort : M Level := do
+  let u := mkLevelParam `u
+  let v := mkLevelParam `v
+  match ← rand 10 with
+  | 0 => return u
+  | 1 => return v
+  | 2 => return mkLevelMax u v
+  | 3 => return mkLevelSucc (mkLevelMax u v)
+  | 4 => return mkLevelMax Level.one (mkLevelIMax u v)
+  | 5 => return mkLevelIMax v (mkLevelSucc u)
+  | 6 => return mkLevelMax (mkLevelSucc u) v
+  | 7 => return mkLevelIMax u v
+  | 8 => return mkLevelSucc v
+  | _ => return Level.zero
 
 def sortFor (poly : Bool) : M Level := do
   let u := mkLevelParam `u
@@ -51,19 +69,23 @@ def vanish (rate : Nat) (l : Level) (occ e : Expr) : M Expr := do
   else
     return .letE `X sort arg e false
 
-def genBlock (base : Name) (hideRate : Nat := 0) : M Block := do
-  let poly ← chance 40
-  let lparams := if poly then [`u] else []
+def genBlock (base : Name) (hideRate : Nat := 0) (rich : Bool := false) : M Block := do
+  let poly ← chance (if rich then 70 else 40)
+  let twoLevels := rich && poly && (← chance 60)
+  let lparams := if twoLevels then [`u, `v] else if poly then [`u] else []
   let us := lparams.map mkLevelParam
-  let lvl ← sortFor poly
+  let lvl ← if twoLevels then richSort else sortFor poly
   let ntypes := if ← chance 25 then 2 else 1
   let names := (List.range ntypes).map fun j => base ++ Name.mkSimple s!"T{j}"
   let nparams ← rand 3
-  let indexed ← chance 45
-  let paramLevel := if poly then mkLevelParam `u else Level.one
+  let indexed ← chance (if rich then 60 else 45)
+  let natIndex := rich && indexed && (← chance 60)
+  let idxTy := mkConst (if natIndex then ``Nat else ``Bool)
+  let paramLevel := if twoLevels && (← chance 50) then mkLevelParam `v
+    else if poly then mkLevelParam `u else Level.one
   let rec withParams (left : Nat) (params : Array Expr) : M Block := do
     if left > 0 then
-      withLocalDeclD (Name.mkSimple s!"α{left}") (mkSort (if poly then mkLevelParam `u else Level.one)) fun p =>
+      withLocalDeclD (Name.mkSimple s!"α{left}") (mkSort paramLevel) fun p =>
         withParams (left - 1) (params.push p)
     else
       let mut types : List InductiveType := []
@@ -71,15 +93,16 @@ def genBlock (base : Name) (hideRate : Nat := 0) : M Block := do
         let name := names[i]!
         let result := mkSort lvl
         let type ← mkForallFVars params <|
-          if indexed then .forallE `idx (mkConst ``Bool) result .default else result
+          if indexed then .forallE `idx idxTy result .default else result
         let mut ctors : List Constructor := []
         let nctors := 1 + (← rand 4)
         for j in [0:nctors] do
           let cname := name ++ Name.mkSimple s!"c{j}"
-          let idx := if ← chance 50 then ``Bool.true else ``Bool.false
+          let idx : Expr ← if natIndex then pure (mkRawNatLit (← rand 3))
+            else pure (mkConst (if ← chance 50 then ``Bool.true else ``Bool.false))
           let target (which : Nat) : Expr :=
             mkAppN (mkConst names[which]! us)
-              (if indexed then params.push (mkConst idx) else params)
+              (if indexed then params.push idx else params)
           let result := target i
           let mut fields : Array Expr := #[]
           let mut ctorBody := result
@@ -87,7 +110,14 @@ def genBlock (base : Name) (hideRate : Nat := 0) : M Block := do
             let shape ← rand 11
             if indexed && (shape == 9 || shape == 10) then
               let atIndex (index : Expr) := mkAppN (mkConst name us) (params.push index)
-              ctorBody := if shape == 9 then
+              ctorBody := if natIndex then
+                let succ (e : Expr) := mkApp (mkConst ``Nat.succ) e
+                if shape == 9 then
+                  .forallE `n idxTy (atIndex (succ (.bvar 0))) .default
+                else
+                  .forallE `n idxTy
+                    (.forallE `x (atIndex (.bvar 0)) (atIndex (succ (.bvar 1))) .default) .default
+              else if shape == 9 then
                 .forallE `b (mkConst ``Bool) (atIndex (.bvar 0)) .default
               else
                 .forallE `b (mkConst ``Bool)
@@ -124,17 +154,17 @@ def genBlock (base : Name) (hideRate : Nat := 0) : M Block := do
           let ctorType ← mkForallFVars params ctorBody
           ctors := ctors ++ [{ name := cname, type := ctorType }]
         types := types ++ [({ name, type, ctors } : InductiveType)]
-      return { lparams, nparams, indexed, types }
+      return { lparams, nparams, indexed, natIndex, types }
   withParams nparams #[]
 
-def runInd (seed count : Nat) (hideRate : Nat := 0) : MetaM (Array Name × Array Expr × Nat) := do
+def runInd (seed count : Nat) (hideRate : Nat := 0) (rich : Bool := false) : MetaM (Array Name × Array Expr × Nat) := do
   let mut good := #[]
   let mut targets := #[]
   let mut rejected := 0
   let mut st : GenState := { seed := seed * 2654435761 + 1 }
   for i in [0:count] do
     let base := Name.mkStr `PestycydInd s!"s{seed}x{i}"
-    let (block, st') ← (genBlock base hideRate).run st
+    let (block, st') ← (genBlock base hideRate rich).run st
     st := st'
     let decl := Declaration.inductDecl block.lparams block.nparams block.types false
     if ← tryAdd decl then
@@ -145,7 +175,10 @@ def runInd (seed count : Nat) (hideRate : Nat := 0) : MetaM (Array Name × Array
         let ps := (List.range block.nparams).toArray.map fun _ => mkConst ``Nat
         let us := block.lparams.map fun _ => Level.one
         let head := mkConst ty.name us
-        if block.indexed then
+        if block.indexed && block.natIndex then
+          for k in [0:4] do
+            targets := targets.push (mkAppN head (ps.push (mkRawNatLit k)))
+        else if block.indexed then
           targets := targets.push (mkAppN head (ps.push (mkConst ``Bool.true)))
           targets := targets.push (mkAppN head (ps.push (mkConst ``Bool.false)))
         else

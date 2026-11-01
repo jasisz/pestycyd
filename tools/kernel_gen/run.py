@@ -24,6 +24,8 @@ def main() -> None:
                         help="additional theorems that reduce a generated recursor")
     parser.add_argument("--hide", type=int, default=0,
                         help="percent of constructor fields hidden behind a beta, let or id redex")
+    parser.add_argument("--rich", action="store_true",
+                        help="two universe parameters, richer sorts and Nat indices")
     parser.add_argument("--limit", type=int, help="maximum exports from each category")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--lean", default=str(PINNED_LEAN) if PINNED_LEAN.exists() else "lean")
@@ -49,7 +51,7 @@ open Lean Meta
 set_option Elab.async false
 set_option maxRecDepth 2000
 run_meta do
-  let (indGood, targets, rejected) ← PestycydGen.runInd {args.seed} {args.blocks} {args.hide}
+  let (indGood, targets, rejected) ← PestycydGen.runInd {args.seed} {args.blocks} {args.hide} {'true' if args.rich else 'false'}
   let (termGood, termBad) ← PestycydGen.run {args.seed + 1} {args.terms} indGood targets
   let recGood ← PestycydGen.runRec {args.seed + 2} {args.rec_terms} indGood targets
   IO.FS.writeFile "inductive.names" (String.intercalate "\\n" (indGood.toList.map toString))
@@ -97,6 +99,7 @@ run_meta do
     summary = {
         "seed": args.seed,
         "hide": args.hide,
+        "rich": args.rich,
         "blocks_tried": args.blocks,
         "blocks_rejected": int((build / "rejected.count").read_text()),
         "inductive_types": len(names["inductive"]),
